@@ -3,12 +3,12 @@
 #  VSJModule-y := VSJModule.o kvdb.o
 #  KBUILD_EXTRA_SYMBOLS=$(PWD)/Module.symvers 
 
-
+#CONFIG_MODULE_SIG=n
 obj-m += VSJModule.o
-VSJModule-y := VSJModule.o kvdb.o
+#VSJModule-y :=  kvdb.o
 
 all:
-	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) modules
+	make -C /lib/modules/$(shell uname -r)/build M=$(PWD)  modules
 	gcc testebbchar.c -o test 
 
 clean:

@@ -1,10 +1,10 @@
 #include "kvdb.h"
 
-bool setupNewKVDB(void) {
+static bool setupNewKVDB(void) {
 	/** ACCORDING TO PREFACE: 
 		https://lwn.net/Articles/611628/
 	*/
-	printk(KERN_INFO "setupNewKVDB in progress\n");
+	printk(KERN_INFO "setupNewKVDB in progress in different Doc!\n");
 	/*rhashtable_params *rhp =kmalloc(sizeof(struct rhashtable_params),GFP_KERNEL);
 
 	rhp->nelem_hint = 1024;

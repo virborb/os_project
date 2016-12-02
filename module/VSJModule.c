@@ -121,8 +121,14 @@ static ssize_t dev_read(struct file *filep, char *buffer, size_t len, loff_t *of
  *  @param offset The offset if required
  */
 static ssize_t dev_write(struct file *filep, const char *buffer, size_t len, loff_t *offset){
-   
-   printk(KERN_INFO "EBBChar: Received %zu characters from the user ,op:%d\n ", len, buffer[0]);
+   char op;
+   int key = 0;
+   copy_from_user(&op,buffer,1);
+   copy_from_user(&key,&buffer[1],4);
+   if(op = 0) {
+   		copy_from_user(message,&buffer[5],len-5);
+   }
+   printk(KERN_INFO "EBBChar: Received %zu characters from the user, op:%d, key:%d, value:%s\n ", len , op, key, message);
    return len;
 }
 

@@ -5,6 +5,9 @@
 #include <linux/device.h>         // Header to support the kernel Driver Model
 #include <linux/fs.h>             // Header for the Linux file system support
 #include <asm/uaccess.h>          // Required for the copy to user function
+
+//#include "kvdb.h"          /* Needed for handling the DB with Key Value */
+
 #define  DEVICE_NAME "key_value_DB_char"    ///< The device will appear at /dev/key_value_DB_char using this value
 #define  CLASS_NAME  "key_value_DB"        ///< The device class -- this is a character device driver
 
@@ -25,6 +28,7 @@ static int     dev_open(struct inode *, struct file *);
 static int     dev_release(struct inode *, struct file *);
 static ssize_t dev_read(struct file *, char *, size_t, loff_t *);
 static ssize_t dev_write(struct file *, const char *, size_t, loff_t *);
+static bool setupNewKVDB(void);
 
 /** @brief Devices are represented as file structure in the kernel. The file_operations structure from
  *  /linux/fs.h lists the callback functions that you wish to associated with your file operations
@@ -36,10 +40,16 @@ static struct file_operations fops =
    .read = dev_read,
    .write = dev_write,
    .release = dev_release,
+//   .setupNewKVDB = setupNewKVDB,
 };
 
 static int __init onload(void) {
   printk(KERN_INFO "EBBChar: Initializing the EBBChar LKM\n");
+ /* if(setupNewKVDB())
+      printk(KERN_INFO "EBBChar : kvdb returned \n");  
+   else {
+      printk("EBBChar : kvdb not pos \n");
+   }*/
 
    // Try to dynamically allocate a major number for the device -- more difficult but worth it
    majorNumber = register_chrdev(0, DEVICE_NAME, &fops);
@@ -138,3 +148,38 @@ static int dev_release(struct inode *inodep, struct file *filep){
 
 module_init(onload);
 module_exit(onunload);
+
+bool setupNewKVDB(void) {
+   /** ACCORDING TO PREFACE: 
+      https://lwn.net/Articles/611628/
+   */
+   printk(KERN_INFO "setupNewKVDB in progress\n");
+   /*rhashtable_params *rhp =kmalloc(sizeof(struct rhashtable_params),GFP_KERNEL);
+
+   rhp->nelem_hint = 1024;
+   rhp->key_len =      4;
+   rhp->key_offset = 0;
+   rhp->head_offset =0;*/
+   //rhp->hash_rnd  =  34;
+   //rhp->max_shift  = 13555;
+   //rhp->hashfn = arch_fast_hash();
+   //rhp->mutex_is_held= false;
+
+   return true;
+   /* struct rhashtable_params {
+   size_t        nelem_hint;
+   size_t        key_len;
+   size_t        key_offset;
+   size_t        head_offset;
+   u32        hash_rnd;
+   size_t        max_shift;
+   rht_hashfn_t     hashfn;
+   rht_obj_hashfn_t  obj_hashfn;
+   bool       (*grow_decision)(const struct rhashtable *ht,
+                  size_t new_size);
+   bool       (*shrink_decision)(const struct rhashtable *ht,
+                    size_t new_size);
+   int        (*mutex_is_held)(void);
+    };*/
+
+}

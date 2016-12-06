@@ -7,6 +7,8 @@
 #include <asm/uaccess.h>          // Required for the copy to user function
 
 #include <linux/rhashtable.h>
+//
+
 #include <linux/hash.h>
 #include <linux/slab.h>
 //#include "kvdb.h"          /* Needed for handling the DB with Key Value */
@@ -143,8 +145,7 @@ static ssize_t dev_read(struct file *filep, char *buffer, size_t len, loff_t *of
    if (error_count==0){            // if true then have success
       printk(KERN_INFO "EBBChar: Sent %d characters to the user\n", size_of_message);
       return (size_of_message=0);  // clear the position to the start and return 0
-   }
-   else {
+   } else {
       printk(KERN_INFO "EBBChar: Failed to send %d characters to the user\n", error_count);
       return -EFAULT;              // Failed -- return a bad address message (i.e. -14)
    }
@@ -180,6 +181,13 @@ static int dev_release(struct inode *inodep, struct file *filep){
    return 0;
 }
 
+
+    struct hashed_object {
+   int key;
+   struct rhash_head node;
+   /* Stuff of actual interest */
+    } hashed_object;
+
 static bool setupNewKVDB(void) {
    /** ACCORDING TO PREFACE: 
       https://lwn.net/Articles/611628/
@@ -191,11 +199,18 @@ static bool setupNewKVDB(void) {
    rhp->key_len =      4;
    rhp->key_offset = 0;
    rhp->head_offset =0;
-   // rhp->hash_rnd  =  34;
-   // rhp->max_shift  = 13555;
-   // rhp->hashfn = arch_fast_hash();
-   // rhp->mutex_is_held= false;
+   struct rhashtable *hashTable =kmalloc(sizeof(struct rhashtable),GFP_KERNEL);
+   struct hashed_object *objectet = kmalloc(sizeof(struct hashed_object),GFP_KERNEL);
+    //rhp->hash_rnd  =  34;
+    //rhp->max_shift  = 13555;
+    //rhp->hashfn = arch_fast_hash();
+    //rhp->mutex_is_held= false;
 
+   int initint=   rhashtable_init(hashTable,rhp);
+   printk(KERN_INFO "rhashtable iniited @ last w returnval : %d \n",initint);
+   /*https://lwn.net/Articles/612100/ Demonstrates*/
+   //rhashtable_insert(struct rhashtable *ht, struct rhash_head *node,gfp_t gfp_flags);
+  // rhashtable_insert(hashTable,objectet->node,NULL);
     return true;
    //  struct rhashtable_params {
    // size_t        nelem_hint;

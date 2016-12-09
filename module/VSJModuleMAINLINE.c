@@ -195,15 +195,16 @@ static bool setupNewKVDB(void) {
    printk(KERN_INFO "setupNewKVDB in progress @ last\n");
    struct rhashtable_params *rhp;
    rhp =kmalloc(sizeof(struct rhashtable_params),GFP_KERNEL);
-   rhp->nelem_hint = 1024;
+    rhp->nelem_hint = 1024;
    rhp->key_len =      4;
    rhp->key_offset = 0;
    rhp->head_offset =0;
+   rhp->hashfn = NULL;
    rhp->obj_hashfn=NULL;
-   struct rhash_head *inst=kmalloc(sizeof(struct rhash_head),GFP_KERNEL);
+   rhash_head *inst=kmalloc(sizeof(struct rhash_head),GFP_KERNEL);
    struct rhashtable *hashTable =kmalloc(sizeof(struct rhashtable),GFP_KERNEL);
    struct hashed_object *objectet = kmalloc(sizeof(struct hashed_object),GFP_KERNEL);
-   //inst->key=10;
+   inst->key=10;
 //   inst->value=
     //rhp->hash_rnd  =  34;
     //rhp->max_shift  = 13555;
@@ -212,9 +213,8 @@ static bool setupNewKVDB(void) {
 //__rhashtable_insert_fast(   struct rhashtable *ht, const void *key, struct rhash_head *obj,
  //  const struct rhashtable_params params)
    int initint=   rhashtable_init(hashTable,rhp);
-   //const void *key= kmalloc(sizeof(int));
- //  int inserted = rhashtable_insert_fast(hashTable,inst,*rhp);
-  // printk(KERN_INFO "rhashtable iniited @ last w returnval : %d, Insert returned = &d \n",initint,inserted);
+   rhashtable_insert_fast(hashTable,10,inst);
+   printk(KERN_INFO "rhashtable iniited @ last w returnval : %d \n",initint);
    /*https://lwn.net/Articles/612100/ Demonstrates*/
    //rhashtable_insert(struct rhashtable *ht, struct rhash_head *node,gfp_t gfp_flags);
   // rhashtable_insert(hashTable,objectet->node,NULL);

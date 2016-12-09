@@ -203,38 +203,23 @@ static bool setupNewKVDB(void) {
    struct rhash_head *inst=kmalloc(sizeof(struct rhash_head),GFP_KERNEL);
    struct rhashtable *hashTable =kmalloc(sizeof(struct rhashtable),GFP_KERNEL);
    struct hashed_object *objectet = kmalloc(sizeof(struct hashed_object),GFP_KERNEL);
-   //inst->key=10;
-//   inst->value=
+    //inst->key=10;
+    //   inst->value=
     //rhp->hash_rnd  =  34;
     //rhp->max_shift  = 13555;
     //rhp->hashfn = arch_fast_hash();
     //rhp->mutex_is_held= false;
-//__rhashtable_insert_fast(   struct rhashtable *ht, const void *key, struct rhash_head *obj,
- //  const struct rhashtable_params params)
+    //__rhashtable_insert_fast{   struct rhashtable *ht, const void *key, struct rhash_head *obj,
+    //  const struct rhashtable_params params)
    int initint=   rhashtable_init(hashTable,rhp);
-   //const void *key= kmalloc(sizeof(int));
- //  int inserted = rhashtable_insert_fast(hashTable,inst,*rhp);
-  // printk(KERN_INFO "rhashtable iniited @ last w returnval : %d, Insert returned = &d \n",initint,inserted);
-   /*https://lwn.net/Articles/612100/ Demonstrates*/
-   //rhashtable_insert(struct rhashtable *ht, struct rhash_head *node,gfp_t gfp_flags);
-  // rhashtable_insert(hashTable,objectet->node,NULL);
+    //const void *key= kmalloc(sizeof(int));
+  // int inserted = rhashtable_insert_fast(hashTable,inst,*rhp);
+    rhashtable_insert(hashTable,inst,GFP_KERNEL);
+   //printk(KERN_INFO "rhashtable iniited @ last w returnval : %d, Insert returned = &d \n",initint,inserted);
+    /*  */
+    //rhashtable_insert(struct rhashtable *ht, struct rhash_head *node,gfp_t gfp_flags);
+    // rhashtable_insert(hashTable,objectet->node,NULL);
     return true;
-   //  struct rhashtable_params {
-   // size_t        nelem_hint;
-   // size_t        key_len;
-   // size_t        key_offset;
-   // size_t        head_offset;
-   // u32        hash_rnd;
-   // size_t        max_shift;
-   // rht_hashfn_t     hashfn;
-   // rht_obj_hashfn_t  obj_hashfn;
-   // bool       (*grow_decision)(const struct rhashtable *ht,
-   //                size_t new_size);
-   // bool       (*shrink_decision)(const struct rhashtable *ht,
-   //                  size_t new_size);
-   // int        (*mutex_is_held)(void);
-   //  };
-
 }
 
 module_init(onload);

@@ -5,8 +5,8 @@
 
 #CONFIG_MODULE_SIG=n
 ifneq ($(KERNELRELEASE),)
-obj-m := VSJModule.o
-VSJModule-y := VSJmod_dev.o VSJmod_kvdb.o
+obj-m := ebbchar.o
+ebbchar-y := ebbchara.o ebbcharb.o
 
 else
 # normal makefile
@@ -18,6 +18,7 @@ default:
 clean:
 	$(MAKE) -C $(KDIR) M=$PWD clean
 
+# Module specific targets
 endif
 
 #all:

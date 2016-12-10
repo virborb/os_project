@@ -21,19 +21,34 @@ MODULE_AUTHOR("VSJ");    ///< The author -- visible when you use modinfo
 MODULE_DESCRIPTION("A simple Linux char driver for the BBB");  ///< The description -- see modinfo
 MODULE_VERSION("0.1");            ///< A version number to inform users
 
+struct hashed_object {
+    int key;
+    void * value;
+    size_t size; //size of the value
+    struct rhash_head node;
+};
+
 static int    majorNumber;                  ///< Stores the device number -- determined automatically
 static char   message[256] = {0};           ///< Memory for the string that is passed from userspace
 static short  size_of_message;              ///< Used to remember the size of the string stored
 static int    numberOpens = 0;              ///< Counts the number of times the device is opened
 static struct class*  ebbcharClass  = NULL; ///< The device-driver class struct pointer
 static struct device* ebbcharDevice = NULL; ///< The device-driver device struct pointer
+static struct rhashtable *ht;
+static struct rhashtable_params params = {
+    .head_offset = offsetof(struct hashed_object, node),
+    .key_offset = offsetof(struct hashed_object, key),
+    .key_len = sizeof(int),
+    .hashfn = jhash,
+    .nulls_base = (1U << RHT_BASE_SHIFT),
+};
 
 // The prototype functions for the character driver -- must come before the struct definition
 static int     dev_open(struct inode *, struct file *);
 static int     dev_release(struct inode *, struct file *);
 static ssize_t dev_read(struct file *, char *, size_t, loff_t *);
 static ssize_t dev_write(struct file *, const char *, size_t, loff_t *);
-static bool    setupNewKVDB(void);
+static int    setupNewKVDB(void);
 
 
 
@@ -74,11 +89,14 @@ static struct file_operations fops =
 };
 
 static int __init onload(void) {
+    struct hashed_object *testobject;
+    int test;
+
   printk(KERN_INFO "EBBChar: Initializing the EBBChar LKM\n");
-  if(setupNewKVDB())
-      printk(KERN_INFO "EBBChar : kvdb returned \n");  
+  if(0 == setupNewKVDB())
+      printk(KERN_INFO "EBBChar : kvdb returned \n");
    else {
-      printk("EBBChar : kvdb not pos \n");
+      printk("EBBChar : kvdb not pos\n");
    }
 
    // Try to dynamically allocate a major number for the device -- more difficult but worth it
@@ -107,6 +125,21 @@ static int __init onload(void) {
       return PTR_ERR(ebbcharDevice);
    }
    printk(KERN_INFO "EBBChar: device class created correctly\n"); // Made it! device was initialized
+
+   //testing the rhashtable
+   testobject = kmalloc(sizeof(struct hashed_object), GFP_KERNEL);
+   testobject->key = 10;
+   testobject->value = kmalloc(sizeof(int), GFP_KERNEL);
+   *((int*)testobject->value) = 7;
+   testobject->size = sizeof(int);
+   test = rhashtable_insert_fast(ht, &(testobject->node), params);
+   test = 10;
+   testobject = rhashtable_lookup_fast(ht, &test, params);
+    if(testobject != NULL){
+        printk(KERN_INFO "VSJ: rhashtable test returned %d\n", *((int*)testobject->value));
+    } else {
+        printk(KERN_INFO "VSJ: testobject is null\n");
+    }
    return 0;
 }
 
@@ -162,10 +195,20 @@ static ssize_t dev_read(struct file *filep, char *buffer, size_t len, loff_t *of
 static ssize_t dev_write(struct file *filep, const char *buffer, size_t len, loff_t *offset){
    char op;
    int key = 0;
-   copy_from_user(&op,buffer,1);
-   copy_from_user(&key,&buffer[1],4);
-   if(op = 0) {
-   		copy_from_user(message,&buffer[5],len-5);
+   int nc;
+   nc = copy_from_user(&op,buffer,1);
+   if(nc){
+       printk(KERN_INFO "VSJModule:in write copy 1 %d bytes not copied\n", nc);
+   }
+   nc = copy_from_user(&key,&buffer[1],4);
+   if(nc){
+       printk(KERN_INFO "VSJModule:in write copy 2 %d bytes not copied\n", nc);
+   }
+   if(op == 0) {
+   		nc = copy_from_user(message,&buffer[5],len-5);
+        if(nc){
+            printk(KERN_INFO "VSJModule:in write copy 2 %d bytes not copied\n", nc);
+        }
    }
    printk(KERN_INFO "EBBChar: Received %zu characters from the user, op:%d, key:%d, value:%s\n ", len , op, key, message);
    return len;
@@ -181,61 +224,60 @@ static int dev_release(struct inode *inodep, struct file *filep){
    return 0;
 }
 
+static int setupNewKVDB(void) {
+    /** ACCORDING TO PREFACE:
+    https://lwn.net/Articles/611628/
+    */
+    int ret;
+    printk(KERN_INFO "setupNewKVDB in progress @ last\n");
+    ht = kmalloc(sizeof(struct rhashtable), GFP_KERNEL);
 
-    struct hashed_object {
-   int key;
-   struct rhash_head node;
-   /* Stuff of actual interest */
-    } hashed_object;
-
-static bool setupNewKVDB(void) {
-   /** ACCORDING TO PREFACE: 
-      https://lwn.net/Articles/611628/
-   */
-   printk(KERN_INFO "setupNewKVDB in progress @ last\n");
-   struct rhashtable_params *rhp;
-   rhp =kmalloc(sizeof(struct rhashtable_params),GFP_KERNEL);
-   rhp->nelem_hint = 1024;
-   rhp->key_len =      4;
-   rhp->key_offset = 0;
-   rhp->head_offset =0;
-   rhp->obj_hashfn=NULL;
-   struct rhash_head *inst=kmalloc(sizeof(struct rhash_head),GFP_KERNEL);
-   struct rhashtable *hashTable =kmalloc(sizeof(struct rhashtable),GFP_KERNEL);
-   struct hashed_object *objectet = kmalloc(sizeof(struct hashed_object),GFP_KERNEL);
-   //inst->key=10;
-//   inst->value=
-    //rhp->hash_rnd  =  34;
-    //rhp->max_shift  = 13555;
-    //rhp->hashfn = arch_fast_hash();
-    //rhp->mutex_is_held= false;
-//__rhashtable_insert_fast(   struct rhashtable *ht, const void *key, struct rhash_head *obj,
- //  const struct rhashtable_params params)
-   int initint=   rhashtable_init(hashTable,rhp);
-   //const void *key= kmalloc(sizeof(int));
- //  int inserted = rhashtable_insert_fast(hashTable,inst,*rhp);
-  // printk(KERN_INFO "rhashtable iniited @ last w returnval : %d, Insert returned = &d \n",initint,inserted);
-   /*https://lwn.net/Articles/612100/ Demonstrates*/
-   //rhashtable_insert(struct rhashtable *ht, struct rhash_head *node,gfp_t gfp_flags);
-  // rhashtable_insert(hashTable,objectet->node,NULL);
-    return true;
-   //  struct rhashtable_params {
-   // size_t        nelem_hint;
-   // size_t        key_len;
-   // size_t        key_offset;
-   // size_t        head_offset;
-   // u32        hash_rnd;
-   // size_t        max_shift;
-   // rht_hashfn_t     hashfn;
-   // rht_obj_hashfn_t  obj_hashfn;
-   // bool       (*grow_decision)(const struct rhashtable *ht,
-   //                size_t new_size);
-   // bool       (*shrink_decision)(const struct rhashtable *ht,
-   //                  size_t new_size);
-   // int        (*mutex_is_held)(void);
-   //  };
+    ret = rhashtable_init(ht, &params);
+    return ret;
+        /*struct rhashtable_params *rhp;
+        rhp =kmalloc(sizeof(struct rhashtable_params),GFP_KERNEL);
+        rhp->nelem_hint = 1024;
+        rhp->key_len =      4;
+        rhp->key_offset = 0;
+        rhp->head_offset =0;
+        rhp->hashfn = NULL;
+        rhp->obj_hashfn=NULL;
+        rhash_head *inst=kmalloc(sizeof(struct rhash_head),GFP_KERNEL);
+        struct rhashtable *hashTable =kmalloc(sizeof(struct rhashtable),GFP_KERNEL);
+        struct hashed_object *objectet = kmalloc(sizeof(struct hashed_object),GFP_KERNEL);
+        inst->key=10;
+        //   inst->value=
+        //rhp->hash_rnd  =  34;
+        //rhp->max_shift  = 13555;
+        //rhp->hashfn = arch_fast_hash();
+        //rhp->mutex_is_held= false;
+        //__rhashtable_insert_fast(   struct rhashtable *ht, const void *key, struct rhash_head *obj,
+        //  const struct rhashtable_params params)
+        int initint=   rhashtable_init(hashTable,rhp);
+        rhashtable_insert_fast(hashTable,10,inst);
+        printk(KERN_INFO "rhashtable iniited @ last w returnval : %d \n",initint);
+        https://lwn.net/Articles/612100/ Demonstrates
+        //rhashtable_insert(struct rhashtable *ht, struct rhash_head *node,gfp_t gfp_flags);
+        // rhashtable_insert(hashTable,objectet->node,NULL);
+    return ret;
+        //  struct rhashtable_params {
+        // size_t        nelem_hint;
+        // size_t        key_len;
+        // size_t        key_offset;
+        // size_t        head_offset;
+        // u32        hash_rnd;
+        // size_t        max_shift;
+        // rht_hashfn_t     hashfn;
+        // rht_obj_hashfn_t  obj_hashfn;
+        // bool       (*grow_decision)(const struct rhashtable *ht,
+        //                size_t new_size);
+        // bool       (*shrink_decision)(const struct rhashtable *ht,
+        //                  size_t new_size);
+        // int        (*mutex_is_held)(void);
+        //  };*/
 
 }
+
 
 module_init(onload);
 module_exit(onunload);

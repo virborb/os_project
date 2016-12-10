@@ -4,23 +4,12 @@
 #  KBUILD_EXTRA_SYMBOLS=$(PWD)/Module.symvers
 
 #CONFIG_MODULE_SIG=n
-ifneq ($(KERNELRELEASE),)
-obj-m := VSJModule.o
-VSJModule-y := VSJmod_dev.o VSJmod_kvdb.o
+obj-m += VSJModule.o
+#VSJModule-y :=  kvdb.o
 
-else
-# normal makefile
-KDIR ?= /lib/modules/`uname -r`/build
-
-default:
-	$(MAKE) -C $(KDIR) M=$$PWD
+all:
+	make -C /lib/modules/$(shell uname -r)/build M=$(PWD)  modules
+	gcc testebbchar.c -o test
 
 clean:
-	$(MAKE) -C $(KDIR) M=$PWD clean
-
-endif
-
-#all:
-#	make -C /lib/modules/`uname -r`)/build M=$PWD	modules
-#	gcc testebbchar.c -o test
-#
+	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) clean

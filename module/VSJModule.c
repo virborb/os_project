@@ -11,7 +11,7 @@
 
 #include <linux/hash.h>
 #include <linux/slab.h>
-//#include "kvdb.h"          /* Needed for handling the DB with Key Value */
+#include "VSJModule.h"          /* Needed for handling the DB with Key Value */
 
 #define  DEVICE_NAME "key_value_DB_char"    ///< The device will appear at /dev/key_value_DB_char using this value
 #define  CLASS_NAME  "key_value_DB"        ///< The device class -- this is a character device driver
@@ -49,7 +49,9 @@ static int     dev_release(struct inode *, struct file *);
 static ssize_t dev_read(struct file *, char *, size_t, loff_t *);
 static ssize_t dev_write(struct file *, const char *, size_t, loff_t *);
 static int    setupNewKVDB(void);
-
+static int KVDB_add (int key, void *val, size_t size);
+static int KVDB_remove (int *key);
+static void KVDB_free_fn(void *ptr, void *arg);
 
 
 
@@ -89,14 +91,17 @@ static struct file_operations fops =
 };
 
 static int __init onload(void) {
-    struct hashed_object *testobject;
-    int test;
+    char *teststr;
+    struct hashed_object *testobj;
+    int ret, i ,j;
 
   printk(KERN_INFO "EBBChar: Initializing the EBBChar LKM\n");
-  if(0 == setupNewKVDB())
+  ret = setupNewKVDB();
+  if(ret == 0){
       printk(KERN_INFO "EBBChar : kvdb returned \n");
-   else {
+  } else {
       printk("EBBChar : kvdb not pos\n");
+      return ret;
    }
 
    // Try to dynamically allocate a major number for the device -- more difficult but worth it
@@ -127,19 +132,28 @@ static int __init onload(void) {
    printk(KERN_INFO "EBBChar: device class created correctly\n"); // Made it! device was initialized
 
    //testing the rhashtable
-   testobject = kmalloc(sizeof(struct hashed_object), GFP_KERNEL);
-   testobject->key = 10;
-   testobject->value = kmalloc(sizeof(int), GFP_KERNEL);
-   *((int*)testobject->value) = 7;
-   testobject->size = sizeof(int);
-   test = rhashtable_insert_fast(ht, &(testobject->node), params);
-   test = 10;
-   testobject = rhashtable_lookup_fast(ht, &test, params);
-    if(testobject != NULL){
-        printk(KERN_INFO "VSJ: rhashtable test returned %d\n", *((int*)testobject->value));
-    } else {
-        printk(KERN_INFO "VSJ: testobject is null\n");
-    }
+   for(i = 0; i < 10; ++i) {
+       teststr = kmalloc((i + 2) * sizeof(char), GFP_KERNEL);
+       for(j = 0; j < (i + 1); ++j){
+           *(teststr + j) = 'a';
+       }
+       *(teststr + i + 1) = '\0';
+       printk(KERN_INFO "VSJ\n");
+       printk(KERN_INFO "VSJ: str %s\n", teststr);
+       if(KVDB_add(i, teststr, (size_t) i+2)){
+           printk(KERN_INFO "VSJ memory\n");
+       }
+       teststr = NULL;
+   }
+   for(i = 0; i < 10; ++i){
+       testobj = KVDB_lookup(ht, &i, params);
+       if(testobj == NULL){
+           printk(KERN_INFO "VSJModule: lookup for key %d ret null\n", i);
+       } else {
+           printk(KERN_INFO "VSJModule: value in key %d is %s\n", i, (char*)testobj->value);
+           KVDB_remove(&i);
+       }
+   }
    return 0;
 }
 
@@ -148,6 +162,7 @@ static void __exit onunload(void) {
    class_unregister(ebbcharClass);                          // unregister the device class
    class_destroy(ebbcharClass);                             // remove the device class
    unregister_chrdev(majorNumber, DEVICE_NAME);             // unregister the major number
+   rhashtable_free_and_destroy(ht, &KVDB_free_fn, NULL);
    printk(KERN_INFO "EBBChar: Goodbye from the LKM!\n");
 }
 
@@ -231,8 +246,13 @@ static int setupNewKVDB(void) {
     int ret;
     printk(KERN_INFO "setupNewKVDB in progress @ last\n");
     ht = kmalloc(sizeof(struct rhashtable), GFP_KERNEL);
-
+    if(ht == NULL){
+        return -ENOMEM;
+    }
     ret = rhashtable_init(ht, &params);
+    if(ret != 0){
+        kfree(ht);
+    }
     return ret;
         /*struct rhashtable_params *rhp;
         rhp =kmalloc(sizeof(struct rhashtable_params),GFP_KERNEL);
@@ -275,9 +295,45 @@ static int setupNewKVDB(void) {
         //                  size_t new_size);
         // int        (*mutex_is_held)(void);
         //  };*/
-
 }
 
+static int KVDB_add (int key, void *val, size_t size){
+    int ret;
+    struct hashed_object *obj;
+    obj = kmalloc(sizeof(struct hashed_object), GFP_KERNEL);
+    if(unlikely(obj == NULL)){
+        return -ENOMEM;
+    }
+
+    obj->key = key;
+    obj->value = val;
+    obj->size = size;
+    ret = rhashtable_insert_fast(ht, &(obj->node), params);
+    if(ret != 0){
+        kfree(obj);
+    }
+    return ret;
+}
+
+static int KVDB_remove (int *key){
+    struct hashed_object *obj;
+    int ret;
+    obj = KVDB_lookup(ht, key, params);
+    if(obj == NULL){
+        return -ENOENT;
+    }
+    ret = rhashtable_remove_fast(ht, &(obj->node), params);
+    if(ret == 0){
+        kfree(obj->value);
+        kfree(obj);
+    }
+    return ret;
+}
+
+static void KVDB_free_fn(void *ptr, void *arg) {
+    kfree(&((struct hashed_object *)ptr)->value);
+    kfree(ptr);
+}
 
 module_init(onload);
 module_exit(onunload);

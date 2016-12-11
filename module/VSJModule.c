@@ -7,33 +7,22 @@
 #include <asm/uaccess.h>          // Required for the copy to user function
 
 #include <linux/rhashtable.h>
-//
 
 #include <linux/hash.h>
 #include <linux/slab.h>
 #include "VSJModule.h"          /* Needed for handling the DB with Key Value */
 
-#define  DEVICE_NAME "key_value_DB_char"    ///< The device will appear at /dev/key_value_DB_char using this value
-#define  CLASS_NAME  "key_value_DB"        ///< The device class -- this is a character device driver
-
 MODULE_LICENSE("GPL");            ///< The license type -- this affects available functionality
-MODULE_AUTHOR("VSJ");    ///< The author -- visible when you use modinfo
-MODULE_DESCRIPTION("A simple Linux char driver for the BBB");  ///< The description -- see modinfo
+MODULE_AUTHOR("Victor Lundgren, Simon Vasterbo, Jon Leijon");    ///< The author -- visible when you use modinfo
+MODULE_DESCRIPTION("A Key-Value DB");  ///< The description -- see modinfo
 MODULE_VERSION("0.1");            ///< A version number to inform users
-
-struct hashed_object {
-    int key;
-    void * value;
-    size_t size; //size of the value
-    struct rhash_head node;
-};
 
 static int    majorNumber;                  ///< Stores the device number -- determined automatically
 static char   message[256] = {0};           ///< Memory for the string that is passed from userspace
 static short  size_of_message;              ///< Used to remember the size of the string stored
 static int    numberOpens = 0;              ///< Counts the number of times the device is opened
-static struct class*  ebbcharClass  = NULL; ///< The device-driver class struct pointer
-static struct device* ebbcharDevice = NULL; ///< The device-driver device struct pointer
+static struct class*  charClass  = NULL; ///< The device-driver class struct pointer
+static struct device* charDevice = NULL; ///< The device-driver device struct pointer
 static struct rhashtable *ht;
 static struct rhashtable_params params = {
     .head_offset = offsetof(struct hashed_object, node),
@@ -42,40 +31,6 @@ static struct rhashtable_params params = {
     .hashfn = jhash,
     .nulls_base = (1U << RHT_BASE_SHIFT),
 };
-
-// The prototype functions for the character driver -- must come before the struct definition
-static int     dev_open(struct inode *, struct file *);
-static int     dev_release(struct inode *, struct file *);
-static ssize_t dev_read(struct file *, char *, size_t, loff_t *);
-static ssize_t dev_write(struct file *, const char *, size_t, loff_t *);
-static int    setupNewKVDB(void);
-static int KVDB_add (int key, void *val, size_t size);
-static int KVDB_remove (int *key);
-static void KVDB_free_fn(void *ptr, void *arg);
-
-
-
-
-/*
- struct rhashtable_params {
-   size_t        nelem_hint;
-   size_t        key_len;
-   size_t        key_offset;
-   size_t        head_offset;
-   u32        hash_rnd;
-   size_t        max_shift;
-   rht_hashfn_t     hashfn;
-   rht_obj_hashfn_t  obj_hashfn;
-   bool       (*grow_decision)(const struct rhashtable *ht,
-                  size_t new_size);
-   bool       (*shrink_decision)(const struct rhashtable *ht,
-                    size_t new_size);
-   int        (*mutex_is_held)(void);
-    };
-
-*/
-
-
 
 /** @brief Devices are represented as file structure in the kernel. The file_operations structure from
  *  /linux/fs.h lists the callback functions that you wish to associated with your file operations
@@ -87,7 +42,6 @@ static struct file_operations fops =
    .read = dev_read,
    .write = dev_write,
    .release = dev_release,
-//   .setupNewKVDB = setupNewKVDB,
 };
 
 static int __init onload(void) {
@@ -95,41 +49,41 @@ static int __init onload(void) {
     struct hashed_object *testobj;
     int ret, i ,j;
 
-  printk(KERN_INFO "EBBChar: Initializing the EBBChar LKM\n");
+  printk(KERN_INFO "VSJModule: Initializing the VSJModule LKM\n");
   ret = setupNewKVDB();
   if(ret == 0){
-      printk(KERN_INFO "EBBChar : kvdb returned \n");
+      printk(KERN_INFO "VSJModule : kvdb returned \n");
   } else {
-      printk("EBBChar : kvdb not pos\n");
+      printk("VSJModule : kvdb not pos\n");
       return ret;
    }
 
    // Try to dynamically allocate a major number for the device -- more difficult but worth it
    majorNumber = register_chrdev(0, DEVICE_NAME, &fops);
    if (majorNumber<0){
-      printk(KERN_ALERT "EBBChar failed to register a major number\n");
+      printk(KERN_ALERT "VSJModule failed to register a major number\n");
       return majorNumber;
    }
-   printk(KERN_INFO "EBBChar: registered correctly with major number %d\n", majorNumber);
+   printk(KERN_INFO "VSJModule: registered correctly with major number %d\n", majorNumber);
 
    // Register the device class
-   ebbcharClass = class_create(THIS_MODULE, CLASS_NAME);
-   if (IS_ERR(ebbcharClass)){                // Check for error and clean up if there is
+   charClass = class_create(THIS_MODULE, CLASS_NAME);
+   if (IS_ERR(charClass)){                // Check for error and clean up if there is
       unregister_chrdev(majorNumber, DEVICE_NAME);
       printk(KERN_ALERT "Failed to register device class\n");
-      return PTR_ERR(ebbcharClass);          // Correct way to return an error on a pointer
+      return PTR_ERR(charClass);          // Correct way to return an error on a pointer
    }
-   printk(KERN_INFO "EBBChar: device class registered correctly\n");
+   printk(KERN_INFO "VSJModule: device class registered correctly\n");
 
    // Register the device driver
-   ebbcharDevice = device_create(ebbcharClass, NULL, MKDEV(majorNumber, 0), NULL, DEVICE_NAME);
-   if (IS_ERR(ebbcharDevice)){               // Clean up if there is an error
-      class_destroy(ebbcharClass);           // Repeated code but the alternative is goto statements
+   charDevice = device_create(charClass, NULL, MKDEV(majorNumber, 0), NULL, DEVICE_NAME);
+   if (IS_ERR(charDevice)){               // Clean up if there is an error
+      class_destroy(charClass);           // Repeated code but the alternative is goto statements
       unregister_chrdev(majorNumber, DEVICE_NAME);
       printk(KERN_ALERT "Failed to create the device\n");
-      return PTR_ERR(ebbcharDevice);
+      return PTR_ERR(charDevice);
    }
-   printk(KERN_INFO "EBBChar: device class created correctly\n"); // Made it! device was initialized
+   printk(KERN_INFO "VSJModule: device class created correctly\n"); // Made it! device was initialized
 
    //testing the rhashtable
    for(i = 0; i < 10; ++i) {
@@ -158,12 +112,12 @@ static int __init onload(void) {
 }
 
 static void __exit onunload(void) {
-   device_destroy(ebbcharClass, MKDEV(majorNumber, 0));     // remove the device
-   class_unregister(ebbcharClass);                          // unregister the device class
-   class_destroy(ebbcharClass);                             // remove the device class
+   device_destroy(charClass, MKDEV(majorNumber, 0));     // remove the device
+   class_unregister(charClass);                          // unregister the device class
+   class_destroy(charClass);                             // remove the device class
    unregister_chrdev(majorNumber, DEVICE_NAME);             // unregister the major number
    rhashtable_free_and_destroy(ht, &KVDB_free_fn, NULL);
-   printk(KERN_INFO "EBBChar: Goodbye from the LKM!\n");
+   printk(KERN_INFO "VSJModule: Goodbye from the LKM!\n");
 }
 
 /** @brief The device open function that is called each time the device is opened
@@ -173,7 +127,7 @@ static void __exit onunload(void) {
  */
 static int dev_open(struct inode *inodep, struct file *filep){
    numberOpens++;
-   printk(KERN_INFO "EBBChar: Device has been opened %d time(s)\n", numberOpens);
+   printk(KERN_INFO "VSJModule: Device has been opened %d time(s)\n", numberOpens);
    return 0;
 }
 
@@ -191,10 +145,10 @@ static ssize_t dev_read(struct file *filep, char *buffer, size_t len, loff_t *of
    error_count = copy_to_user(buffer, message, size_of_message);
 
    if (error_count==0){            // if true then have success
-      printk(KERN_INFO "EBBChar: Sent %d characters to the user\n", size_of_message);
+      printk(KERN_INFO "VSJModule: Sent %d characters to the user\n", size_of_message);
       return (size_of_message=0);  // clear the position to the start and return 0
    } else {
-      printk(KERN_INFO "EBBChar: Failed to send %d characters to the user\n", error_count);
+      printk(KERN_INFO "VSJModule: Failed to send %d characters to the user\n", error_count);
       return -EFAULT;              // Failed -- return a bad address message (i.e. -14)
    }
 }
@@ -225,7 +179,7 @@ static ssize_t dev_write(struct file *filep, const char *buffer, size_t len, lof
             printk(KERN_INFO "VSJModule:in write copy 2 %d bytes not copied\n", nc);
         }
    }
-   printk(KERN_INFO "EBBChar: Received %zu characters from the user, op:%d, key:%d, value:%s\n ", len , op, key, message);
+   printk(KERN_INFO "VSJModule: Received %zu characters from the user, op:%d, key:%d, value:%s\n ", len , op, key, message);
    return len;
 }
 
@@ -235,7 +189,7 @@ static ssize_t dev_write(struct file *filep, const char *buffer, size_t len, lof
  *  @param filep A pointer to a file object (defined in linux/fs.h)
  */
 static int dev_release(struct inode *inodep, struct file *filep){
-   printk(KERN_INFO "EBBChar: Device successfully closed\n");
+   printk(KERN_INFO "VSJModule: Device successfully closed\n");
    return 0;
 }
 
@@ -254,47 +208,6 @@ static int setupNewKVDB(void) {
         kfree(ht);
     }
     return ret;
-        /*struct rhashtable_params *rhp;
-        rhp =kmalloc(sizeof(struct rhashtable_params),GFP_KERNEL);
-        rhp->nelem_hint = 1024;
-        rhp->key_len =      4;
-        rhp->key_offset = 0;
-        rhp->head_offset =0;
-        rhp->hashfn = NULL;
-        rhp->obj_hashfn=NULL;
-        rhash_head *inst=kmalloc(sizeof(struct rhash_head),GFP_KERNEL);
-        struct rhashtable *hashTable =kmalloc(sizeof(struct rhashtable),GFP_KERNEL);
-        struct hashed_object *objectet = kmalloc(sizeof(struct hashed_object),GFP_KERNEL);
-        inst->key=10;
-        //   inst->value=
-        //rhp->hash_rnd  =  34;
-        //rhp->max_shift  = 13555;
-        //rhp->hashfn = arch_fast_hash();
-        //rhp->mutex_is_held= false;
-        //__rhashtable_insert_fast(   struct rhashtable *ht, const void *key, struct rhash_head *obj,
-        //  const struct rhashtable_params params)
-        int initint=   rhashtable_init(hashTable,rhp);
-        rhashtable_insert_fast(hashTable,10,inst);
-        printk(KERN_INFO "rhashtable iniited @ last w returnval : %d \n",initint);
-        https://lwn.net/Articles/612100/ Demonstrates
-        //rhashtable_insert(struct rhashtable *ht, struct rhash_head *node,gfp_t gfp_flags);
-        // rhashtable_insert(hashTable,objectet->node,NULL);
-    return ret;
-        //  struct rhashtable_params {
-        // size_t        nelem_hint;
-        // size_t        key_len;
-        // size_t        key_offset;
-        // size_t        head_offset;
-        // u32        hash_rnd;
-        // size_t        max_shift;
-        // rht_hashfn_t     hashfn;
-        // rht_obj_hashfn_t  obj_hashfn;
-        // bool       (*grow_decision)(const struct rhashtable *ht,
-        //                size_t new_size);
-        // bool       (*shrink_decision)(const struct rhashtable *ht,
-        //                  size_t new_size);
-        // int        (*mutex_is_held)(void);
-        //  };*/
 }
 
 static int KVDB_add (int key, void *val, size_t size){

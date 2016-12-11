@@ -29,11 +29,12 @@ struct hashed_object {
 };
 
 static int    majorNumber;                  ///< Stores the device number -- determined automatically
-static char   message[256] = {0};           ///< Memory for the string that is passed from userspace
-static short  size_of_message;              ///< Used to remember the size of the string stored
+//static char   message[256] = {0};           ///< Memory for the string that is passed from userspace
+//static short  size_of_message;              ///< Used to remember the size of the string stored
 static int    numberOpens = 0;              ///< Counts the number of times the device is opened
 static struct class*  ebbcharClass  = NULL; ///< The device-driver class struct pointer
 static struct device* ebbcharDevice = NULL; ///< The device-driver device struct pointer
+static int    getkey; //temporär lösning
 static struct rhashtable *ht;
 static struct rhashtable_params params = {
     .head_offset = offsetof(struct hashed_object, node),
@@ -173,6 +174,7 @@ static void __exit onunload(void) {
  */
 static int dev_open(struct inode *inodep, struct file *filep){
    numberOpens++;
+   nonseekable_open(inodep, filep);
    printk(KERN_INFO "EBBChar: Device has been opened %d time(s)\n", numberOpens);
    return 0;
 }
@@ -186,17 +188,18 @@ static int dev_open(struct inode *inodep, struct file *filep){
  *  @param offset The offset if required
  */
 static ssize_t dev_read(struct file *filep, char *buffer, size_t len, loff_t *offset){
-   int error_count = 0;
-   // copy_to_user has the format ( * to, *from, size) and returns 0 on success
-   error_count = copy_to_user(buffer, message, size_of_message);
-
-   if (error_count==0){            // if true then have success
-      printk(KERN_INFO "EBBChar: Sent %d characters to the user\n", size_of_message);
-      return (size_of_message=0);  // clear the position to the start and return 0
-   } else {
-      printk(KERN_INFO "EBBChar: Failed to send %d characters to the user\n", error_count);
-      return -EFAULT;              // Failed -- return a bad address message (i.e. -14)
+   int err, cplen;
+   struct hashed_object *obj;
+   obj = KVDB_lookup(ht, &getkey, params);
+   if(obj == NULL) {
+       return -ENOKEY;
    }
+   cplen = len > obj->size ? obj->size : len;
+   err = copy_to_user(buffer, obj->value, cplen);
+   if(err) {
+       return -EFAULT;
+   }
+   return cplen;
 }
 
 /** @brief This function is called whenever the device is being written to from user space i.e.
@@ -210,23 +213,54 @@ static ssize_t dev_read(struct file *filep, char *buffer, size_t len, loff_t *of
 static ssize_t dev_write(struct file *filep, const char *buffer, size_t len, loff_t *offset){
    char op;
    int key = 0;
-   int nc;
-   nc = copy_from_user(&op,buffer,1);
-   if(nc){
-       printk(KERN_INFO "VSJModule:in write copy 1 %d bytes not copied\n", nc);
+   int err;
+   void* val;
+   int remlen = len;
+
+   if(len < 5){
+       return -EBADRQC;
    }
-   nc = copy_from_user(&key,&buffer[1],4);
-   if(nc){
-       printk(KERN_INFO "VSJModule:in write copy 2 %d bytes not copied\n", nc);
+   err = copy_from_user(&op,buffer,1);
+   if(err){
+       printk(KERN_INFO "VSJModule:in write copy 1 %d bytes not copied\n", err);
+       return -EFAULT;
    }
-   if(op == 0) {
-   		nc = copy_from_user(message,&buffer[5],len-5);
-        if(nc){
-            printk(KERN_INFO "VSJModule:in write copy 2 %d bytes not copied\n", nc);
+   printk(KERN_INFO"VSJModule req code: %c\n", op);
+   remlen -= 1;
+   err = copy_from_user(&key,&buffer[1],sizeof(int));
+   if(err){
+       printk(KERN_INFO "VSJModule:in write copy 2 %d bytes not copied\n", err);
+       return -EFAULT;
+   }
+   remlen -= sizeof(int);
+   switch (op) {
+   case VSJ_GET:
+        getkey = key;
+        return 5;
+   case VSJ_SET:
+        if(remlen < 1){
+            return -ENODATA; //Ändra till lämpligare
         }
+        val = kmalloc(remlen, GFP_KERNEL);
+        if(unlikely(val == NULL)){
+            return -ENOMEM;
+        }
+        err = copy_from_user(val, &buffer[5], remlen);
+        if(err){
+            printk(KERN_INFO "VSJModule:in write SET %d bytes not copied\n", err);
+            kfree(val);
+            return -EFAULT;
+        }
+        err = KVDB_add(key, val, remlen);
+        if(err){
+            kfree(val);
+            return err;
+        }
+        return len;
+    case VSJ_DEL:
+        return KVDB_remove(&key);
    }
-   printk(KERN_INFO "EBBChar: Received %zu characters from the user, op:%d, key:%d, value:%s\n ", len , op, key, message);
-   return len;
+   return -EBADRQC;
 }
 
 /** @brief The device release function that is called whenever the device is closed/released by

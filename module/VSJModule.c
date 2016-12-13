@@ -33,6 +33,14 @@ static struct rhashtable_params params = {
     .nulls_base = (1U << RHT_BASE_SHIFT),
 };
 
+static unsigned long max_val_size = 0;
+static char *file_location = NULL;
+
+module_param(max_val_size, ulong, 0644);
+MODULE_PARM_DESC(max_val_size, "Maximum size of the value");
+module_param(file_location, charp, 0644);
+MODULE_PARM_DESC(file_location, "Where the saved key value store will be read from.");
+
 /** @brief Devices are represented as file structure in the kernel. The file_operations structure from
  *  /linux/fs.h lists the callback functions that you wish to associated with your file operations
  *  using a C99 syntax structure. char devices usually implement open, read, write and release calls
@@ -58,6 +66,16 @@ static int __init onload(void) {
       printk("VSJModule : kvdb not pos\n");
       return ret;
    }
+
+   if(max_val_size > SIZE_MAX) {
+     max_val_size = SIZE_MAX;
+   }
+
+   printk(KERN_INFO "VSJ: max_val_size: %lu\n", max_val_size);
+   if(file_location != NULL){
+     printk(KERN_INFO "VSJ: file_location: %s\n", file_location);
+   }
+
 
    // Try to dynamically allocate a major number for the device -- more difficult but worth it
    majorNumber = register_chrdev(0, DEVICE_NAME, &fops);

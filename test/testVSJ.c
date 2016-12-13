@@ -115,6 +115,13 @@ int main(){
                     keyarr[i], intarr[i], i, strerror(errno));
            continue;
        }
+       buf[0] = VSJ_GET;
+       ret = write(fd, buf, sizeof(int) + 1);
+       if (ret < 0){
+           printf("ERROR in write GET, key:%d, int:%d, i:%d\n error: %s\n",
+                    keyarr[i], intarr[i], i, strerror(errno));
+           continue;
+       }
        ret = read(fd, &testint, sizeof(int));        // Read the response from the LKM
        if (ret < 0 && errno == ENOKEY){
            /*printf("DEL success, key:%d, int:%d, i:%d\n error: %s\n",
@@ -153,6 +160,13 @@ int main(){
        ret = write(fd, buf, sizeof(int) + 1);
        if (ret < 0){
            printf("ERROR in write DEL, key:%d, str:%s, i:%d\n error: %s\n",
+                    keyarr[i + 20], strarr[i], i, strerror(errno));
+           continue;
+       }
+       buf[0] = VSJ_GET;
+       ret = write(fd, buf, sizeof(int) + 1);
+       if (ret < 0){
+           printf("ERROR in write GET, key:%d, str:%s, i:%d\n error: %s\n",
                     keyarr[i + 20], strarr[i], i, strerror(errno));
            continue;
        }

@@ -1,7 +1,7 @@
 #include <linux/module.h>  /* Needed by all kernel modules */
 #include <linux/kernel.h>  /* Needed for loglevels (KERN_WARNING, KERN_EMERG, KERN_INFO, etc.) */
 #include <linux/init.h>    /* Needed for __init and __exit macros. */
-
+#include <linux/sched.h>
 #include <linux/device.h>         // Header to support the kernel Driver Model
 #include <linux/fs.h>             // Header for the Linux file system support
 #include <asm/uaccess.h>          // Required for the copy to user function
@@ -23,12 +23,19 @@ static int    majorNumber;                  ///< Stores the device number -- det
 static int    numberOpens = 0;              ///< Counts the number of times the device is opened
 static struct class*  charClass  = NULL; ///< The device-driver class struct pointer
 static struct device* charDevice = NULL; ///< The device-driver device struct pointer
-static int    getkey; //temporär lösning
-static struct rhashtable *ht;
+//static int    getkey; //temporär lösnin
+static struct rhashtable *ht, *keytable;
 static struct rhashtable_params params = {
     .head_offset = offsetof(struct hashed_object, node),
     .key_offset = offsetof(struct hashed_object, key),
     .key_len = sizeof(int),
+    .hashfn = jhash,
+    .nulls_base = (1U << RHT_BASE_SHIFT),
+};
+static struct rhashtable_params ktparams = {
+    .head_offset = offsetof(struct hashed_key, node),
+    .key_offset = offsetof(struct hashed_key, pid),
+    .key_len = sizeof(pid_t),
     .hashfn = jhash,
     .nulls_base = (1U << RHT_BASE_SHIFT),
 };
@@ -54,9 +61,7 @@ static struct file_operations fops =
 };
 
 static int __init onload(void) {
-    char *teststr;
-    struct hashed_object *testobj;
-    int ret, i ,j;
+    int ret;
 
   printk(KERN_INFO "VSJModule: Initializing the VSJModule LKM\n");
   ret = setupNewKVDB();
@@ -81,6 +86,8 @@ static int __init onload(void) {
    majorNumber = register_chrdev(0, DEVICE_NAME, &fops);
    if (majorNumber<0){
       printk(KERN_ALERT "VSJModule failed to register a major number\n");
+      kfree(ht);
+      kfree(keytable);
       return majorNumber;
    }
    printk(KERN_INFO "VSJModule: registered correctly with major number %d\n", majorNumber);
@@ -90,6 +97,8 @@ static int __init onload(void) {
    if (IS_ERR(charClass)){                // Check for error and clean up if there is
       unregister_chrdev(majorNumber, DEVICE_NAME);
       printk(KERN_ALERT "Failed to register device class\n");
+      kfree(ht);
+      kfree(keytable);
       return PTR_ERR(charClass);          // Correct way to return an error on a pointer
    }
    printk(KERN_INFO "VSJModule: device class registered correctly\n");
@@ -99,34 +108,13 @@ static int __init onload(void) {
    if (IS_ERR(charDevice)){               // Clean up if there is an error
       class_destroy(charClass);           // Repeated code but the alternative is goto statements
       unregister_chrdev(majorNumber, DEVICE_NAME);
+      kfree(ht);
+      kfree(keytable);
       printk(KERN_ALERT "Failed to create the device\n");
       return PTR_ERR(charDevice);
    }
    printk(KERN_INFO "VSJModule: device class created correctly\n"); // Made it! device was initialized
 
-   //testing the rhashtable
-   for(i = 0; i < 10; ++i) {
-       teststr = kmalloc((i + 2) * sizeof(char), GFP_KERNEL);
-       for(j = 0; j < (i + 1); ++j){
-           *(teststr + j) = 'a';
-       }
-       *(teststr + i + 1) = '\0';
-       printk(KERN_INFO "VSJ\n");
-       printk(KERN_INFO "VSJ: str %s\n", teststr);
-       if(KVDB_add(i, teststr, (size_t) i+2)){
-           printk(KERN_INFO "VSJ memory\n");
-       }
-       teststr = NULL;
-   }
-   for(i = 0; i < 10; ++i){
-       testobj = KVDB_lookup(ht, &i, params);
-       if(testobj == NULL){
-           printk(KERN_INFO "VSJModule: lookup for key %d ret null\n", i);
-       } else {
-           printk(KERN_INFO "VSJModule: value in key %d is %s\n", i, (char*)testobj->value);
-           KVDB_remove(&i);
-       }
-   }
    return 0;
 }
 
@@ -136,6 +124,9 @@ static void __exit onunload(void) {
    class_destroy(charClass);                             // remove the device class
    unregister_chrdev(majorNumber, DEVICE_NAME);             // unregister the major number
    rhashtable_free_and_destroy(ht, &KVDB_free_fn, NULL);
+   rhashtable_free_and_destroy(keytable, &keyfree, NULL);
+   kfree(keytable);
+   kfree(ht);
    printk(KERN_INFO "VSJModule: Goodbye from the LKM!\n");
 }
 
@@ -160,9 +151,19 @@ static int dev_open(struct inode *inodep, struct file *filep){
  *  @param offset The offset if required
  */
 static ssize_t dev_read(struct file *filep, char *buffer, size_t len, loff_t *offset){
-   int err, cplen;
+   int err, cplen, key;
    struct hashed_object *obj;
-   obj = KVDB_lookup(ht, &getkey, params);
+   struct hashed_key *keyobj;
+   pid_t pid;
+
+   pid = task_pid_nr(current);
+   keyobj = getkey(keytable, pid, ktparams);
+   if(keyobj == NULL){
+       return -EBADE;
+   }
+   key = keyobj->key;
+   kfree(keyobj);
+   obj = KVDB_lookup(ht, &key, params);
    if(obj == NULL) {
        return -ENOKEY;
    }
@@ -185,7 +186,7 @@ static ssize_t dev_read(struct file *filep, char *buffer, size_t len, loff_t *of
 static ssize_t dev_write(struct file *filep, const char *buffer, size_t len, loff_t *offset){
    char op;
    int key = 0;
-   int err;
+   int err, pid;
    void* val;
    int remlen = len;
 
@@ -207,13 +208,17 @@ static ssize_t dev_write(struct file *filep, const char *buffer, size_t len, lof
    remlen -= sizeof(int);
    switch (op) {
    case VSJ_GET:
-        getkey = key;
+        pid = task_pid_nr(current);
+        err = addkey(key, keytable, pid, ktparams);
+        if(err){
+            return err;
+        }
         return 5;
    case VSJ_SET:
         if(remlen < 1){
             return -ENODATA; //Ändra till lämpligare
         }
-        if(remlen > max_val_size){
+        if(max_val_size && remlen > max_val_size){
           return -EFBIG;
         }
         val = kmalloc(remlen, GFP_KERNEL);
@@ -263,6 +268,17 @@ static int setupNewKVDB(void) {
     if(ret != 0){
         kfree(ht);
     }
+
+    keytable = kmalloc(sizeof(struct rhashtable), GFP_KERNEL);
+    if(keytable == NULL){
+        kfree(ht);
+        return -ENOMEM;
+    }
+    ret = rhashtable_init(keytable, &ktparams);
+    if(ret != 0){
+        kfree(keytable);
+        kfree(ht);
+    }
     return ret;
 }
 
@@ -301,6 +317,10 @@ static int KVDB_remove (int *key){
 
 static void KVDB_free_fn(void *ptr, void *arg) {
     kfree(&((struct hashed_object *)ptr)->value);
+    kfree(ptr);
+}
+
+static void keyfree(void *ptr, void *arg){
     kfree(ptr);
 }
 

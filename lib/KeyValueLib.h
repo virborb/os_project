@@ -6,18 +6,15 @@
 #include <unistd.h>
 #include <string.h>
 
-#define PUT 0
-#define GET 1
-#define DEL 2
-
-#define MAX_KEY_LEN 4
-#define MAX_VAL_LEN 10
+#define VSJ_GET 0
+#define VSJ_SET 1
+#define VSJ_DEL 2
 
 int open_KeyValueDB();
 
-int insert_elem(int key, char *val, int val_len);
+int insert_elem(int key, void *val, size_t val_len);
 
-char *get_elem(int key);
+void *get_elem(int key, void *val, size_t val_len);
 
 int remove_elem(int key);
 

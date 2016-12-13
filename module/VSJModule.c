@@ -213,6 +213,9 @@ static ssize_t dev_write(struct file *filep, const char *buffer, size_t len, lof
         if(remlen < 1){
             return -ENODATA; //Ändra till lämpligare
         }
+        if(remlen > max_val_size){
+          return -EFBIG;
+        }
         val = kmalloc(remlen, GFP_KERNEL);
         if(unlikely(val == NULL)){
             return -ENOMEM;

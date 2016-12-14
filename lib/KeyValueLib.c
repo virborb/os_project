@@ -45,7 +45,7 @@ void *get_elem(int key, void *val, size_t val_len) {
         return NULL;
 	}
 	free(str);
-    if(read(fd, &val, val_len) < 0) {
+    if(read(fd, val, val_len) < 0) {
         return NULL;
 	}
 	return val;

@@ -256,7 +256,6 @@ static ssize_t dev_write(struct file *filep, const char *buffer, size_t len, lof
     }
    }
 
-
    switch (op) {
    case VSJ_GET:
         pid = task_pid_nr(current);
@@ -277,8 +276,7 @@ static ssize_t dev_write(struct file *filep, const char *buffer, size_t len, lof
             return -ENOMEM;
         }
         err = copy_from_user(val, &buffer[5], remlen);
-        if(err){
-            printk(KERN_INFO "VSJModule:in write SET %d bytes not copied\n", err);
+        if(err){            printk(KERN_INFO "VSJModule:in write SET %d bytes not copied\n", err);
             kfree(val);
             return -EFAULT;
         }

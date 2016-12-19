@@ -109,19 +109,21 @@ int closeAndSave_KeyValueDB(char *filename) {
 
 }
 
-int readNext(){
+int readNext(char *buffer){
 
 	int val_len=100;
-	char *buf=malloc(sizeof(char)*val_len);
-
-	if(		read(fd,buf,val_len)<0)
-		return 0;
-	fprintf(stdout, "Returned from iterator %s\n", buf);
+	int qret= read(fd,buffer,val_len);
+	if(qret<0){
+			return 0;
+	}	
+	buffer[qret]='\0';
+	fprintf(stdout, "Returned from iterator %s\n", buffer);
  	
  	return 1;
 }
 
 int save_KeyValueDB(char *filename) {
+	int val_len=100;
 	FILE *fp = fopen(filename,"w");
 	if(fp<0) {
 		fprintf(stderr, "couldnt save %s\n", filename);	
@@ -129,7 +131,7 @@ int save_KeyValueDB(char *filename) {
 	char *str = malloc(4);
 
 	str[0] = VSJ_SAVE;
-
+	char *buf=malloc(sizeof(char)*val_len);
 	int ff=0;
 	ff=write(fd, str, sizeof(int));
 	if(ff < 0) {
@@ -137,6 +139,8 @@ int save_KeyValueDB(char *filename) {
 	}
 	int q=1;
 	while (q){
-		q=readNext();	
+		q=readNext(buf);	
+		fprintf(fp, "%s\n",buf);
+
 	} 
 }

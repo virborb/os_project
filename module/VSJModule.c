@@ -54,68 +54,68 @@ MODULE_PARM_DESC(file_location, "Where the saved key value store will be read fr
  */
 static struct file_operations fops =
 {
-   .open = dev_open,
-   .read = dev_read,
-   .write = dev_write,
-   .release = dev_release,
+    .open = dev_open,
+    .read = dev_read,
+    .write = dev_write,
+    .release = dev_release,
 };
 
 static int __init onload(void) {
     int ret;
 
-  printk(KERN_INFO "VSJModule: Initializing the VSJModule LKM\n");
-  ret = setupNewKVDB();
-  if(ret == 0){
-      printk(KERN_INFO "VSJModule : kvdb returned \n");
-  } else {
-      printk("VSJModule : kvdb not pos\n");
-      return ret;
-   }
+    printk(KERN_INFO "VSJModule: Initializing the VSJModule LKM\n");
+    ret = setupNewKVDB();
+    if(ret == 0){
+        printk(KERN_INFO "VSJModule : kvdb returned \n");
+    } else {
+        printk("VSJModule : kvdb not pos\n");
+        return ret;
+    }
 
-   if(max_val_size > SIZE_MAX) {
+    if(max_val_size > SIZE_MAX) {
      max_val_size = SIZE_MAX;
-   }
+    }
 
-   printk(KERN_INFO "VSJ: max_val_size: %lu\n", max_val_size);
-   if(file_location != NULL){
-     printk(KERN_INFO "VSJ: file_location: %s\n", file_location);
-   }
+    printk(KERN_INFO "VSJ: max_val_size: %lu\n", max_val_size);
+    if(file_location != NULL){
+        printk(KERN_INFO "VSJ: file_location: %s\n", file_location);
+    }
 
 
-   // Try to dynamically allocate a major number for the device -- more difficult but worth it
-   majorNumber = register_chrdev(0, DEVICE_NAME, &fops);
-   if (majorNumber<0){
-      printk(KERN_ALERT "VSJModule failed to register a major number\n");
-      kfree(ht);
-      kfree(keytable);
-      return majorNumber;
-   }
-   printk(KERN_INFO "VSJModule: registered correctly with major number %d\n", majorNumber);
+    // Try to dynamically allocate a major number for the device -- more difficult but worth it
+    majorNumber = register_chrdev(0, DEVICE_NAME, &fops);
+    if (majorNumber<0){
+        printk(KERN_ALERT "VSJModule failed to register a major number\n");
+        kfree(ht);
+        kfree(keytable);
+        return majorNumber;
+    }
+    printk(KERN_INFO "VSJModule: registered correctly with major number %d\n", majorNumber);
 
-   // Register the device class
-   charClass = class_create(THIS_MODULE, CLASS_NAME);
-   if (IS_ERR(charClass)){                // Check for error and clean up if there is
-      unregister_chrdev(majorNumber, DEVICE_NAME);
-      printk(KERN_ALERT "Failed to register device class\n");
-      kfree(ht);
-      kfree(keytable);
-      return PTR_ERR(charClass);          // Correct way to return an error on a pointer
-   }
-   printk(KERN_INFO "VSJModule: device class registered correctly\n");
+    // Register the device class
+    charClass = class_create(THIS_MODULE, CLASS_NAME);
+    if (IS_ERR(charClass)){                // Check for error and clean up if there is
+        unregister_chrdev(majorNumber, DEVICE_NAME);
+        printk(KERN_ALERT "Failed to register device class\n");
+        kfree(ht);
+        kfree(keytable);
+        return PTR_ERR(charClass);          // Correct way to return an error on a pointer
+    }
+    printk(KERN_INFO "VSJModule: device class registered correctly\n");
 
-   // Register the device driver
-   charDevice = device_create(charClass, NULL, MKDEV(majorNumber, 0), NULL, DEVICE_NAME);
-   if (IS_ERR(charDevice)){               // Clean up if there is an error
-      class_destroy(charClass);           // Repeated code but the alternative is goto statements
-      unregister_chrdev(majorNumber, DEVICE_NAME);
-      kfree(ht);
-      kfree(keytable);
-      printk(KERN_ALERT "Failed to create the device\n");
-      return PTR_ERR(charDevice);
-   }
-   printk(KERN_INFO "VSJModule: device class created correctly\n"); // Made it! device was initialized
+    // Register the device driver
+    charDevice = device_create(charClass, NULL, MKDEV(majorNumber, 0), NULL, DEVICE_NAME);
+    if (IS_ERR(charDevice)){               // Clean up if there is an error
+        class_destroy(charClass);           // Repeated code but the alternative is goto statements
+        unregister_chrdev(majorNumber, DEVICE_NAME);
+        kfree(ht);
+        kfree(keytable);
+        printk(KERN_ALERT "Failed to create the device\n");
+        return PTR_ERR(charDevice);
+    }
+    printk(KERN_INFO "VSJModule: device class created correctly\n"); // Made it! device was initialized
 
-   return 0;
+    return 0;
 }
 
 static void __exit onunload(void) {
@@ -151,28 +151,28 @@ static int dev_open(struct inode *inodep, struct file *filep){
  *  @param offset The offset if required
  */
 static ssize_t dev_read(struct file *filep, char *buffer, size_t len, loff_t *offset){
-   int err, cplen, key;
-   struct hashed_object *obj;
-   struct hashed_key *keyobj;
-   pid_t pid;
+    int err, cplen, key;
+    struct hashed_object *obj;
+    struct hashed_key *keyobj;
+    pid_t pid;
 
-   pid = task_pid_nr(current);
-   keyobj = getkey(keytable, pid, ktparams);
-   if(keyobj == NULL){
-       return -EBADE;
-   }
-   key = keyobj->key;
-   kfree(keyobj);
-   obj = KVDB_lookup(ht, &key, params);
-   if(obj == NULL) {
-       return -ENOKEY;
-   }
-   cplen = len > obj->size ? obj->size : len;
-   err = copy_to_user(buffer, obj->value, cplen);
-   if(err) {
-       return -EFAULT;
-   }
-   return cplen;
+    pid = task_pid_nr(current);
+    keyobj = getkey(keytable, pid, ktparams);
+    if(keyobj == NULL){
+        return -EBADE;
+    }
+    key = keyobj->key;
+    kfree(keyobj);
+    obj = KVDB_lookup(ht, &key, params);
+    if(obj == NULL) {
+        return -ENOKEY;
+    }
+    cplen = len > obj->size ? obj->size : len;
+    err = copy_to_user(buffer, obj->value, cplen);
+    if(err) {
+        return -EFAULT;
+    }
+    return cplen;
 }
 
 /** @brief This function is called whenever the device is being written to from user space i.e.

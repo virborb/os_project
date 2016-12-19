@@ -5,6 +5,7 @@
 #include <linux/device.h>         // Header to support the kernel Driver Model
 #include <linux/fs.h>             // Header for the Linux file system support
 #include <asm/uaccess.h>          // Required for the copy to user function
+#include <linux/rwsem.h>
 
 #include <linux/rhashtable.h>
 
@@ -25,6 +26,7 @@ static struct class*  charClass  = NULL; ///< The device-driver class struct poi
 static struct device* charDevice = NULL; ///< The device-driver device struct pointer
 //static int    getkey; //temporär lösnin
 static struct rhashtable *ht, *keytable;
+static struct rw_semaphore sem;
 static struct rhashtable_params params = {
     .head_offset = offsetof(struct hashed_object, node),
     .key_offset = offsetof(struct hashed_object, key),
@@ -103,17 +105,18 @@ static int __init onload(void) {
     }
     printk(KERN_INFO "VSJModule: device class registered correctly\n");
 
-    // Register the device driver
-    charDevice = device_create(charClass, NULL, MKDEV(majorNumber, 0), NULL, DEVICE_NAME);
-    if (IS_ERR(charDevice)){               // Clean up if there is an error
-        class_destroy(charClass);           // Repeated code but the alternative is goto statements
-        unregister_chrdev(majorNumber, DEVICE_NAME);
-        kfree(ht);
-        kfree(keytable);
-        printk(KERN_ALERT "Failed to create the device\n");
-        return PTR_ERR(charDevice);
-    }
-    printk(KERN_INFO "VSJModule: device class created correctly\n"); // Made it! device was initialized
+   // Register the device driver
+   charDevice = device_create(charClass, NULL, MKDEV(majorNumber, 0), NULL, DEVICE_NAME);
+   if (IS_ERR(charDevice)){               // Clean up if there is an error
+      class_destroy(charClass);           // Repeated code but the alternative is goto statements
+      unregister_chrdev(majorNumber, DEVICE_NAME);
+      kfree(ht);
+      kfree(keytable);
+      printk(KERN_ALERT "Failed to create the device\n");
+      return PTR_ERR(charDevice);
+   }
+   init_rwsem(&sem);
+   printk(KERN_INFO "VSJModule: device class created correctly\n"); // Made it! device was initialized
 
     return 0;
 }
@@ -156,23 +159,27 @@ static ssize_t dev_read(struct file *filep, char *buffer, size_t len, loff_t *of
     struct hashed_key *keyobj;
     pid_t pid;
 
-    pid = task_pid_nr(current);
-    keyobj = getkey(keytable, pid, ktparams);
-    if(keyobj == NULL){
-        return -EBADE;
-    }
-    key = keyobj->key;
-    kfree(keyobj);
-    obj = KVDB_lookup(ht, &key, params);
-    if(obj == NULL) {
-        return -ENOKEY;
-    }
-    cplen = len > obj->size ? obj->size : len;
-    err = copy_to_user(buffer, obj->value, cplen);
-    if(err) {
-        return -EFAULT;
-    }
-    return cplen;
+   pid = task_pid_nr(current);
+   keyobj = getkey(keytable, pid, ktparams);
+   if(keyobj == NULL){
+       return -EBADE;
+   }
+   key = keyobj->key;
+   kfree(keyobj);
+   down_read(&sem);
+   obj = KVDB_lookup(ht, &key, params);
+   if(obj == NULL) {
+       up_read(&sem);
+       return -ENOKEY;
+   }
+   cplen = len > obj->size ? obj->size : len;
+   err = copy_to_user(buffer, obj->value, cplen);
+   if(err) {
+       up_read(&sem);
+       return -EFAULT;
+   }
+   up_read(&sem);
+   return cplen;
 }
 
 /** @brief This function is called whenever the device is being written to from user space i.e.
@@ -307,11 +314,13 @@ static int KVDB_remove (int *key){
     if(obj == NULL){
         return -ENOENT;
     }
+    down_write(&sem);
     ret = rhashtable_remove_fast(ht, &(obj->node), params);
     if(ret == 0){
         kfree(obj->value);
         kfree(obj);
     }
+    up_write(&sem);
     return ret;
 }
 

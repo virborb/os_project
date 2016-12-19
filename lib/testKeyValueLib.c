@@ -13,18 +13,25 @@ int main() {
     } else {
     	printf("open success\n");
     }
-    if(insert_elem(3, "value", 5) < 0) {
+    char str[100] = {0};
+    printf("Type in a short string to send to the kernel module:\n");
+   scanf("%[^\n]%*c", str);                // Read in a string (with spaces)
+   printf("Writing message to the device [%s].\n", str);
+    if(insert_elem(3, str, strlen(str)) < 0) {
     	perror("insert");
     	exit(-1);
     } else {
     	printf("insert success\n");
     }
-    char *test = get_elem(3);
+    char test[20] = {0};
+    printf("Press ENTER to read back from the device...\n");
+    getchar();
+    get_elem(3, test, strlen(str));
     if(test == NULL) {
     	perror("get");
     	exit(-1);
     } else {
-    	printf("get success\n");
+    	printf("get success ,%s\n", test);
     }
     if(remove_elem(3) < 0) {
     	perror("remove");

@@ -2,6 +2,8 @@
 
 int fd = 0;
 
+/** @brief Open the key-value database.
+ */
 int open_KeyValueDB() {
     fd = open("/dev/key_value_DB_char", O_RDWR);
     if(fd < 0) {
@@ -10,6 +12,12 @@ int open_KeyValueDB() {
     return 0;
 }
 
+/** @brief inserts an element to the database.
+ *  @param key The key of the value
+ *  @param val The value
+ *  @param val_len The size of the value
+ *  Returns a pointer to the  value.
+ */
 int insert_elem(int key, void *val, size_t val_len) {
     int tot_len = val_len + sizeof(int) + 1;
     char *str = malloc(tot_len);
@@ -30,6 +38,12 @@ int insert_elem(int key, void *val, size_t val_len) {
 	return 0;
 }
 
+/** @brief Gets an element with the given
+ *  key from the database.
+ *	@param key The key for the value to get
+ *  @param val Where to save the value
+ *  @param val_len The size of the value
+ */
 void *get_elem(int key, void *val, size_t val_len) {
     int tot_len = sizeof(int) + 1;
     char *str = malloc(tot_len);
@@ -51,6 +65,10 @@ void *get_elem(int key, void *val, size_t val_len) {
 	return val;
 }
 
+
+/** @brief Removes an element in the database with the given key.
+ *  @param key The key of the element to remove.
+ */
 int remove_elem(int key) {
     int tot_len = sizeof(int) + 1;
     char *str = malloc(tot_len);

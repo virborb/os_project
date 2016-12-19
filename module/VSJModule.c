@@ -13,20 +13,21 @@
 #include <linux/slab.h>
 #include "VSJModule.h"          /* Needed for handling the DB with Key Value */
 
-MODULE_LICENSE("GPL");            ///< The license type -- this affects available functionality
-MODULE_AUTHOR("Victor Lundgren, Simon Vasterbo, Jon Leijon");    ///< The author -- visible when you use modinfo
-MODULE_DESCRIPTION("A Key-Value DB");  ///< The description -- see modinfo
-MODULE_VERSION("0.1");            ///< A version number to inform users
+MODULE_LICENSE("GPL");
+MODULE_AUTHOR("Victor Lundgren, Simon Vasterbo, Jon Leijon");
+MODULE_DESCRIPTION("A Key-Value DB");
+MODULE_VERSION("0.1");
 
 static int    majorNumber;                  ///< Stores the device number -- determined automatically
-//static char   message[256] = {0};           ///< Memory for the string that is passed from userspace
-//static short  size_of_message;              ///< Used to remember the size of the string stored
 static int    numberOpens = 0;              ///< Counts the number of times the device is opened
 static struct class*  charClass  = NULL; ///< The device-driver class struct pointer
 static struct device* charDevice = NULL; ///< The device-driver device struct pointer
-//static int    getkey; //temporär lösnin
 static struct rhashtable *ht, *keytable;
 static struct rw_semaphore sem;
+
+static struct rhashtable_iter *iter;       // to iterate ht
+static struct hashed_object **saver;    // to list ht
+
 static struct rhashtable_params params = {
     .head_offset = offsetof(struct hashed_object, node),
     .key_offset = offsetof(struct hashed_object, key),
@@ -45,6 +46,9 @@ static struct rhashtable_params ktparams = {
 static unsigned long max_val_size = 0;
 static char *file_location = NULL;
 
+static pid_t iteratorPID;
+static int iteratorKey,iteratorLength;
+
 module_param(max_val_size, ulong, 0644);
 MODULE_PARM_DESC(max_val_size, "Maximum size of the value");
 module_param(file_location, charp, 0644);
@@ -61,7 +65,9 @@ static struct file_operations fops =
     .write = dev_write,
     .release = dev_release,
 };
-
+/** @brief Creates a character device and rhashtables. Set
+ *  max value size.
+ */
 static int __init onload(void) {
     int ret;
 
@@ -94,21 +100,21 @@ static int __init onload(void) {
     }
     printk(KERN_INFO "VSJModule: registered correctly with major number %d\n", majorNumber);
 
-    // Register the device class
-    charClass = class_create(THIS_MODULE, CLASS_NAME);
-    if (IS_ERR(charClass)){                // Check for error and clean up if there is
-        unregister_chrdev(majorNumber, DEVICE_NAME);
-        printk(KERN_ALERT "Failed to register device class\n");
-        kfree(ht);
-        kfree(keytable);
-        return PTR_ERR(charClass);          // Correct way to return an error on a pointer
-    }
-    printk(KERN_INFO "VSJModule: device class registered correctly\n");
+   // Register the device class
+   charClass = class_create(THIS_MODULE, CLASS_NAME);
+   if (IS_ERR(charClass)){
+      unregister_chrdev(majorNumber, DEVICE_NAME);
+      printk(KERN_ALERT "Failed to register device class\n");
+      kfree(ht);
+      kfree(keytable);
+      return PTR_ERR(charClass);          // Correct way to return an error on a pointer
+   }
+   printk(KERN_INFO "VSJModule: device class registered correctly\n");
 
    // Register the device driver
    charDevice = device_create(charClass, NULL, MKDEV(majorNumber, 0), NULL, DEVICE_NAME);
-   if (IS_ERR(charDevice)){               // Clean up if there is an error
-      class_destroy(charClass);           // Repeated code but the alternative is goto statements
+   if (IS_ERR(charDevice)){
+      class_destroy(charClass);
       unregister_chrdev(majorNumber, DEVICE_NAME);
       kfree(ht);
       kfree(keytable);
@@ -116,16 +122,18 @@ static int __init onload(void) {
       return PTR_ERR(charDevice);
    }
    init_rwsem(&sem);
-   printk(KERN_INFO "VSJModule: device class created correctly\n"); // Made it! device was initialized
+   printk(KERN_INFO "VSJModule: device class created correctly\n");
 
     return 0;
 }
 
+/** @brief Destroys character device and rhashtables.
+ */
 static void __exit onunload(void) {
-   device_destroy(charClass, MKDEV(majorNumber, 0));     // remove the device
-   class_unregister(charClass);                          // unregister the device class
-   class_destroy(charClass);                             // remove the device class
-   unregister_chrdev(majorNumber, DEVICE_NAME);             // unregister the major number
+   device_destroy(charClass, MKDEV(majorNumber, 0));
+   class_unregister(charClass);
+   class_destroy(charClass);
+   unregister_chrdev(majorNumber, DEVICE_NAME);
    rhashtable_free_and_destroy(ht, &KVDB_free_fn, NULL);
    rhashtable_free_and_destroy(keytable, &keyfree, NULL);
    kfree(keytable);
@@ -160,6 +168,24 @@ static ssize_t dev_read(struct file *filep, char *buffer, size_t len, loff_t *of
     pid_t pid;
 
    pid = task_pid_nr(current);
+
+
+   if(pid==iteratorPID) {
+    if(iteratorKey==iteratorLength) {
+     resetIterations();
+     return 0;
+    }
+    cplen = len > saver[iteratorKey]->size ? saver[iteratorKey]->size : len;
+    err = copy_to_user(buffer, saver[iteratorKey]->value, cplen);
+    iteratorKey++;
+    if(err) {
+         return -EFAULT;
+    }
+    return cplen;
+   }
+
+
+
    keyobj = getkey(keytable, pid, ktparams);
    if(keyobj == NULL){
        return -EBADE;
@@ -183,8 +209,8 @@ static ssize_t dev_read(struct file *filep, char *buffer, size_t len, loff_t *of
 }
 
 /** @brief This function is called whenever the device is being written to from user space i.e.
- *  data is sent to the device from the user. The data is copied to the message[] array in this
- *  LKM using the sprintf() function along with the length of the string.
+ *  data is sent to the device from the user.
+ *  Sets, gets or removes data from the hashtable.
  *  @param filep A pointer to a file object
  *  @param buffer The buffer to that contains the string to write to the device
  *  @param len The length of the array of data that is being passed in the const char buffer
@@ -197,7 +223,7 @@ static ssize_t dev_write(struct file *filep, const char *buffer, size_t len, lof
    void* val;
    int remlen = len;
 
-   if(len < 5){
+   if(len < 1){
        return -EBADRQC;
    }
    err = copy_from_user(&op,buffer,1);
@@ -213,6 +239,24 @@ static ssize_t dev_write(struct file *filep, const char *buffer, size_t len, lof
        return -EFAULT;
    }
    remlen -= sizeof(int);
+
+
+    /**
+        THIS is to block all SETS, DEL & SAVE
+        during an active iteration.
+
+        Checks that the iterating process is alive
+   */
+   if((iteratorPID>0) && !(op == VSJ_GET)){
+    //error
+    if(find_get_pid(iteratorPID)==NULL) {
+      resetIterations();
+    } else {
+      return -EFAULT;
+    }
+   }
+
+
    switch (op) {
    case VSJ_GET:
         pid = task_pid_nr(current);
@@ -246,10 +290,59 @@ static ssize_t dev_write(struct file *filep, const char *buffer, size_t len, lof
         return len;
     case VSJ_DEL:
         return KVDB_remove(&key);
+         case VSJ_SAVE:
+        printk(KERN_INFO "VSJModule in SAVE\n");
+        lockAndRead();
+        return 0;
    }
    return -EBADRQC;
-   /*printk(KERN_INFO "VSJModule: Received %zu characters from the user, op:%d, key:%d, value:%s\n ", len , op, key, message);*/
 }
+
+
+static void resetIterations(void){
+      iteratorPID=-1;
+      iteratorKey=-1;
+      if(kfree != NULL)
+        kfree(saver);
+ }
+
+
+static int lockAndRead(void) {
+
+    iteratorKey=0;
+    iteratorPID=task_pid_nr(current);
+
+    iter=kmalloc(sizeof(struct rhashtable_iter),GFP_KERNEL);
+//      rhashtable_walk_enter(ht,iter) UNWORKS ON LINUX 4.4
+    rhashtable_walk_init(ht, iter);
+    if(iter!=NULL)
+      printk(KERN_INFO "iter != Null && ht = %d",iter->ht);
+    rhashtable_walk_start(iter);
+    struct hashed_object *p;
+    p = rhashtable_walk_next(iter);
+
+    /* if(p!=NULL) {
+      printk(KERN_INFO " p not null");
+    }
+    else {
+      printk(KERN_INFO " P IS NULL");
+    }*/
+    iteratorLength = atomic_read(&ht->nelems);
+    saver=kmalloc(sizeof(struct hashed_object*)*iteratorLength, GFP_KERNEL);
+    int i=0;
+    while(p!=NULL) {
+      saver[i]=p;
+    //  printk(KERN_INFO "VSJ LockAndRead: iterator %s, nele : %d\n",saver[i]->value,iteratorLength);
+      p=rhashtable_walk_next(iter);
+      i++;
+    }
+    rhashtable_walk_stop(iter);
+    rhashtable_walk_exit(iter);
+    //nn:aa;:
+    //kfree(saver);
+    return 0;
+}
+
 
 /** @brief The device release function that is called whenever the device is closed/released by
  *  the userspace program
@@ -261,10 +354,10 @@ static int dev_release(struct inode *inodep, struct file *filep){
    return 0;
 }
 
+/** @brief Sets up the rhastable for the key-value database and
+ *  a rhashtable for the get requests.
+ */
 static int setupNewKVDB(void) {
-    /** ACCORDING TO PREFACE:
-    https://lwn.net/Articles/611628/
-    */
     int ret;
     printk(KERN_INFO "setupNewKVDB in progress @ last\n");
     ht = kmalloc(sizeof(struct rhashtable), GFP_KERNEL);
@@ -289,6 +382,11 @@ static int setupNewKVDB(void) {
     return ret;
 }
 
+/** @brief Added a key-value object to the rhashtable.
+ *  @param key The key for the value
+ *  @param val The value
+ *  @param size The size of the value
+ */
 static int KVDB_add (int key, void *val, size_t size){
     int ret;
     struct hashed_object *obj;
@@ -307,6 +405,10 @@ static int KVDB_add (int key, void *val, size_t size){
     return ret;
 }
 
+/** @brief Remove a key-value object with the given key
+ *  from the rhashtable
+ *  @param key The key for the value to remove
+ */
 static int KVDB_remove (int *key){
     struct hashed_object *obj;
     int ret;
@@ -324,11 +426,15 @@ static int KVDB_remove (int *key){
     return ret;
 }
 
+/** @brief Free function for the key-value rhashtable
+ */
 static void KVDB_free_fn(void *ptr, void *arg) {
     kfree(&((struct hashed_object *)ptr)->value);
     kfree(ptr);
 }
 
+/** @brief Free function for get request rhashtable
+ */
 static void keyfree(void *ptr, void *arg){
     kfree(ptr);
 }

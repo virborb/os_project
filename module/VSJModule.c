@@ -58,7 +58,9 @@ static struct file_operations fops =
    .write = dev_write,
    .release = dev_release,
 };
-
+/** @brief Creates a character device and rhashtables. Set
+ *  max value size.
+ */
 static int __init onload(void) {
     int ret;
 
@@ -118,6 +120,8 @@ static int __init onload(void) {
    return 0;
 }
 
+/** @brief Destroys character device and rhashtables.
+ */
 static void __exit onunload(void) {
    device_destroy(charClass, MKDEV(majorNumber, 0));
    class_unregister(charClass);

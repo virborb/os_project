@@ -5,6 +5,7 @@
 #include <linux/device.h>         // Header to support the kernel Driver Model
 #include <linux/fs.h>             // Header for the Linux file system support
 #include <asm/uaccess.h>          // Required for the copy to user function
+#include <linux/rwsem.h>
 
 #include <linux/rhashtable.h>
 
@@ -25,6 +26,7 @@ static struct class*  charClass  = NULL; ///< The device-driver class struct poi
 static struct device* charDevice = NULL; ///< The device-driver device struct pointer
 //static int    getkey; //temporär lösnin
 static struct rhashtable *ht, *keytable;
+static struct rw_semaphore sem;
 static struct rhashtable_params params = {
     .head_offset = offsetof(struct hashed_object, node),
     .key_offset = offsetof(struct hashed_object, key),
@@ -113,6 +115,7 @@ static int __init onload(void) {
       printk(KERN_ALERT "Failed to create the device\n");
       return PTR_ERR(charDevice);
    }
+   init_rwsem(&sem);
    printk(KERN_INFO "VSJModule: device class created correctly\n"); // Made it! device was initialized
 
    return 0;
@@ -163,15 +166,19 @@ static ssize_t dev_read(struct file *filep, char *buffer, size_t len, loff_t *of
    }
    key = keyobj->key;
    kfree(keyobj);
+   down_read(&sem);
    obj = KVDB_lookup(ht, &key, params);
    if(obj == NULL) {
+       up_read(&sem);
        return -ENOKEY;
    }
    cplen = len > obj->size ? obj->size : len;
    err = copy_to_user(buffer, obj->value, cplen);
    if(err) {
+       up_read(&sem);
        return -EFAULT;
    }
+   up_read(&sem);
    return cplen;
 }
 
@@ -307,11 +314,13 @@ static int KVDB_remove (int *key){
     if(obj == NULL){
         return -ENOENT;
     }
+    down_write(&sem);
     ret = rhashtable_remove_fast(ht, &(obj->node), params);
     if(ret == 0){
         kfree(obj->value);
         kfree(obj);
     }
+    up_write(&sem);
     return ret;
 }
 

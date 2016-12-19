@@ -1,9 +1,10 @@
 #ifndef VSJMODULE_H
 #define VSJMODULE_H
 
-#define VSJ_GET 0
-#define VSJ_SET 1
-#define VSJ_DEL 2
+#define VSJ_GET     0
+#define VSJ_SET     1
+#define VSJ_DEL     2
+#define VSJ_SAVE    3
 
 #define  DEVICE_NAME "key_value_DB_char"    ///< The device will appear at /dev/key_value_DB_char using this value
 #define  CLASS_NAME  "key_value_DB"        ///< The device class -- this is a character device driver
@@ -29,6 +30,8 @@ static int KVDB_add (int key, void *val, size_t size);
 static int KVDB_remove (int *key);
 static void KVDB_free_fn(void *ptr, void *arg);
 static void keyfree(void *ptr, void *arg);
+static int lockAndRead(void);
+static void resetIterations(void);
 
 static inline struct hashed_object *KVDB_lookup(
         struct rhashtable *ht, const int *key,

@@ -86,3 +86,57 @@ int remove_elem(int key) {
 	free(str);
 	return 0;
 }
+
+
+int close_KeyValueDB(){
+	int cl = close(fd);
+	if(cl!=0){
+		fprintf(stdout, "%s\n", strerror(cl));
+		return -1;
+	}
+	return 0;
+}
+
+int closeAndSave_KeyValueDB(char *filename) {
+
+	save_KeyValueDB(filename);
+	int cl = close(fd);
+	if(cl!=0) {
+		fprintf(stdout, "%s\n", strerror(cl));
+		return -1;
+	}
+	return 0;
+
+}
+
+int readNext(){
+
+	int val_len=100;
+	char *buf=malloc(sizeof(char)*val_len);
+
+	if(		read(fd,buf,val_len)<0)
+		return 0;
+	fprintf(stdout, "Returned from iterator %s\n", buf);
+ 	
+ 	return 1;
+}
+
+int save_KeyValueDB(char *filename) {
+	FILE *fp = fopen(filename,"w");
+	if(fp<0) {
+		fprintf(stderr, "couldnt save %s\n", filename);	
+	}
+	char *str = malloc(4);
+
+	str[0] = VSJ_SAVE;
+
+	int ff=0;
+	ff=write(fd, str, sizeof(int));
+	if(ff < 0) {
+		fprintf(stderr, "KVL: saveKVDB: %s\n", strerror(ff) );
+	}
+	int q=1;
+	while (q){
+		q=readNext();	
+	} 
+}

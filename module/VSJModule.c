@@ -24,6 +24,10 @@ static struct class*  charClass  = NULL; ///< The device-driver class struct poi
 static struct device* charDevice = NULL; ///< The device-driver device struct pointer
 static struct rhashtable *ht, *keytable;
 static struct rw_semaphore sem;
+
+static struct rhashtable_iter *iter;       // to iterate ht 
+static struct hashed_object **saver;    // to list ht
+
 static struct rhashtable_params params = {
     .head_offset = offsetof(struct hashed_object, node),
     .key_offset = offsetof(struct hashed_object, key),
@@ -41,6 +45,9 @@ static struct rhashtable_params ktparams = {
 
 static unsigned long max_val_size = 0;
 static char *file_location = NULL;
+
+static pid_t iteratorPID;
+static int iteratorKey,iteratorLength;
 
 module_param(max_val_size, ulong, 0644);
 MODULE_PARM_DESC(max_val_size, "Maximum size of the value");
@@ -161,6 +168,24 @@ static ssize_t dev_read(struct file *filep, char *buffer, size_t len, loff_t *of
    pid_t pid;
 
    pid = task_pid_nr(current);
+
+
+   if(pid==iteratorPID) {
+    if(iteratorKey==iteratorLength) {
+     resetIterations();
+     return 0;
+    }
+    cplen = len > saver[iteratorKey]->size ? saver[iteratorKey]->size : len;
+    err = copy_to_user(buffer, saver[iteratorKey]->value, cplen);
+    iteratorKey++;
+    if(err) {
+         return -EFAULT;
+    }
+    return cplen;
+   }
+
+
+
    keyobj = getkey(keytable, pid, ktparams);
    if(keyobj == NULL){
        return -EBADE;
@@ -198,7 +223,7 @@ static ssize_t dev_write(struct file *filep, const char *buffer, size_t len, lof
    void* val;
    int remlen = len;
 
-   if(len < 5){
+   if(len < 1){
        return -EBADRQC;
    }
    err = copy_from_user(&op,buffer,1);
@@ -214,6 +239,24 @@ static ssize_t dev_write(struct file *filep, const char *buffer, size_t len, lof
        return -EFAULT;
    }
    remlen -= sizeof(int);
+
+
+    /**
+        THIS is to block all SETS, DEL & SAVE 
+        during an active iteration.
+
+        Checks that the iterating process is alive
+   */
+   if((iteratorPID>0) && !(op == VSJ_GET)){
+    //error
+    if(find_get_pid(iteratorPID)==NULL) {
+      resetIterations();
+    } else {
+      return -EFAULT;
+    }
+   }
+
+
    switch (op) {
    case VSJ_GET:
         pid = task_pid_nr(current);
@@ -247,9 +290,59 @@ static ssize_t dev_write(struct file *filep, const char *buffer, size_t len, lof
         return len;
     case VSJ_DEL:
         return KVDB_remove(&key);
+         case VSJ_SAVE:
+        printk(KERN_INFO "VSJModule in SAVE\n");
+        lockAndRead();
+        return 0;
    }
    return -EBADRQC;
 }
+
+
+static void resetIterations(void){
+      iteratorPID=-1;
+      iteratorKey=-1;
+      if(kfree != NULL)
+        kfree(saver);
+ }
+
+
+static int lockAndRead(void) {
+
+    iteratorKey=0;
+    iteratorPID=task_pid_nr(current);
+
+    iter=kmalloc(sizeof(struct rhashtable_iter),GFP_KERNEL);
+//      rhashtable_walk_enter(ht,iter) UNWORKS ON LINUX 4.4
+    rhashtable_walk_init(ht, iter);
+    if(iter!=NULL)
+      printk(KERN_INFO "iter != Null && ht = %d",iter->ht);
+    rhashtable_walk_start(iter);
+    struct hashed_object *p; 
+    p = rhashtable_walk_next(iter);
+    
+    /* if(p!=NULL) {
+      printk(KERN_INFO " p not null");
+    }
+    else {
+      printk(KERN_INFO " P IS NULL");
+    }*/
+    iteratorLength = atomic_read(&ht->nelems);
+    saver=kmalloc(sizeof(struct hashed_object*)*iteratorLength, GFP_KERNEL);
+    int i=0;
+    while(p!=NULL) {
+      saver[i]=p;
+    //  printk(KERN_INFO "VSJ LockAndRead: iterator %s, nele : %d\n",saver[i]->value,iteratorLength);
+      p=rhashtable_walk_next(iter);
+      i++;
+    }
+    rhashtable_walk_stop(iter);
+    rhashtable_walk_exit(iter);
+    //nn:aa;:
+    //kfree(saver);
+    return 0;
+}
+
 
 /** @brief The device release function that is called whenever the device is closed/released by
  *  the userspace program

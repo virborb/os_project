@@ -33,10 +33,16 @@ int main() {
     } else {
     	printf("get success ,%s\n", test);
     }
-    if(remove_elem(3) < 0) {
+    /*if(remove_elem(3) < 0) {
     	perror("remove");
     	exit(-1);
     } else {
     	printf("remove success\n");
+    }*/
+
+    char *loc="/home/user/os_project/fp.txt";
+    if(closeAndSave_KeyValueDB(loc)<0){
+        perror("close\n");
+        exit(-1);
     }
 }

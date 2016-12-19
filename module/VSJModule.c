@@ -138,6 +138,9 @@ static void __exit onunload(void) {
    rhashtable_free_and_destroy(keytable, &keyfree, NULL);
    kfree(keytable);
    kfree(ht);
+   if(iteratorKey == -1) {
+       kfree(saver);
+   }
    printk(KERN_INFO "VSJModule: Goodbye from the LKM!\n");
 }
 
@@ -178,6 +181,10 @@ static ssize_t dev_read(struct file *filep, char *buffer, size_t len, loff_t *of
     cplen = len > saver[iteratorKey]->size ? saver[iteratorKey]->size : len;
     err = copy_to_user(buffer, saver[iteratorKey]->value, cplen);
     iteratorKey++;
+    if(iteratorKey > iteratorLength){
+        resetIterations();
+        return -ENODATA;
+    }
     if(err) {
          return -EFAULT;
     }
@@ -314,7 +321,7 @@ static int lockAndRead(void) {
 
     iter=kmalloc(sizeof(struct rhashtable_iter),GFP_KERNEL);
 //      rhashtable_walk_enter(ht,iter) UNWORKS ON LINUX 4.4
-    rhashtable_walk_init(ht, iter);
+    rhashtable_walk_init(ht, iter, GFP_KERNEL);
     if(iter!=NULL)
       printk(KERN_INFO "iter != Null && ht = %d",iter->ht);
     rhashtable_walk_start(iter);

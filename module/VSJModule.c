@@ -48,6 +48,7 @@ static char *file_location = NULL;
 
 static pid_t iteratorPID;
 static int iteratorKey,iteratorLength;
+static int getSize = 1; 
 
 module_param(max_val_size, ulong, 0644);
 MODULE_PARM_DESC(max_val_size, "Maximum size of the value");
@@ -178,15 +179,26 @@ static ssize_t dev_read(struct file *filep, char *buffer, size_t len, loff_t *of
      resetIterations();
      return 0;
     }
-    cplen = len > saver[iteratorKey]->size ? saver[iteratorKey]->size : len;
-    err = copy_to_user(buffer, saver[iteratorKey]->value, cplen);
-    iteratorKey++;
-    if(iteratorKey > iteratorLength){
-        resetIterations();
-        return -ENODATA;
-    }
-    if(err) {
-         return -EFAULT;
+    if(getSize) {
+        printk(KERN_INFO "VSJModule: save: key: %d", saver[iteratorKey]->key);
+        err = copy_to_user(buffer + sizeof(int), &(saver[iteratorKey]->size), sizeof(size_t));
+        err += copy_to_user(buffer, &(saver[iteratorKey]->key), sizeof(int));
+        if(err) {
+            return -EFAULT;
+        }
+        getSize = 0;
+    } else {
+        cplen = len > saver[iteratorKey]->size ? saver[iteratorKey]->size : len;
+        err = copy_to_user(buffer, saver[iteratorKey]->value, cplen);
+        iteratorKey++;
+        getSize = 1;
+        if(iteratorKey > iteratorLength){
+            resetIterations();
+            return -ENODATA;
+        }
+        if(err) {
+             return -EFAULT;
+        }
     }
     return cplen;
    }
@@ -319,7 +331,7 @@ static int lockAndRead(void) {
 
     iter=kmalloc(sizeof(struct rhashtable_iter),GFP_KERNEL);
 //      rhashtable_walk_enter(ht,iter) UNWORKS ON LINUX 4.4
-    rhashtable_walk_init(ht, iter, GFP_KERNEL);
+    rhashtable_walk_init(ht, iter);
     if(iter!=NULL)
       printk(KERN_INFO "iter != Null && ht = %d",iter->ht);
     rhashtable_walk_start(iter);

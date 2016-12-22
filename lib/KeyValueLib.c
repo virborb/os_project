@@ -109,29 +109,43 @@ int closeAndSave_KeyValueDB(char *filename) {
 
 }
 
-int readNext(char *buffer){
+int readNext(void **buffer, int *len){
 
-	int val_len=100;
-	int qret= read(fd,buffer,val_len);
+	int val_len= 0;
+	int key = 0;
+	*len = sizeof(int) + sizeof(size_t);
+	*buffer = malloc(*len);
+	if(*buffer == NULL) {
+		return 0;
+	}
+	int qret= read(fd,*buffer, *len);
 	if(qret<0){
 			return 0;
-	}	
-	buffer[qret]='\0';
-	fprintf(stdout, "Returned from iterator %s\n", buffer);
- 	
+	}
+	memcpy(&key, *buffer, sizeof(int));
+	memcpy(&val_len, *buffer + sizeof(int), sizeof(size_t));
+	*buffer = realloc(*buffer, *len+val_len);
+	qret= read(fd,*buffer + *len, val_len);
+	if(qret<0){
+			return 0;
+	}
+	*len += val_len;
+	fprintf(stdout, "Returned from iterator:");
+ 	printf("key: %d, size:%d, value:%s\n", key, val_len, *buffer + sizeof(int) + sizeof(size_t));
+ 	fprintf(stdout, "\n");
  	return 1;
 }
 
 int save_KeyValueDB(char *filename) {
-	int val_len=100;
-	FILE *fp = fopen(filename,"w");
-	if(fp<0) {
+	int tot_len = 0;
+	int savefd = open(filename, O_WRONLY | O_CREAT);
+	void *buf = NULL;
+	if(savefd<0) {
 		fprintf(stderr, "couldnt save %s\n", filename);	
 	}
 	char *str = malloc(4);
 
 	str[0] = VSJ_SAVE;
-	char *buf=malloc(sizeof(char)*val_len);
 	int ff=0;
 	ff=write(fd, str, sizeof(int));
 	if(ff < 0) {
@@ -139,8 +153,41 @@ int save_KeyValueDB(char *filename) {
 	}
 	int q=1;
 	while (q){
-		q=readNext(buf);	
-		fprintf(fp, "%s\n",buf);
+		q=readNext(&buf, &tot_len);
+		printf("tot_len: %d\n", tot_len);
+		write(savefd, buf, tot_len);
+		free(buf);
+	}
+}
 
-	} 
+int load_KeyValueDB(char *filename) {
+	int val_len = 0;
+	int key = 0;
+	int len = sizeof(int) + sizeof(size_t);
+	void *buf = NULL;
+	int loadfd = open(filename, O_RDONLY);
+	if(loadfd<0) {
+		fprintf(stderr, "couldnt load %s\n", filename);	
+	}
+	buf = malloc(len);
+	if(buf == NULL) {
+		return -1;
+	}
+	int err = read(loadfd,buf, len);
+	if(err<0){
+		return -1;
+	}
+	memcpy(&key, buf, sizeof(int));
+	memcpy(&val_len, buf + sizeof(int), sizeof(size_t));
+	free(buf);
+	buf = malloc(val_len);
+	if(buf == NULL) {
+		return -1;
+	}
+	err = read(loadfd,buf, val_len);
+	if(err<0){
+		return -1;
+	}
+	printf("key: %d, size:%d, value:%s\n", key, val_len, buf);
+	return insert_elem(key, buf, val_len); 
 }

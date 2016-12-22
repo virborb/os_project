@@ -40,9 +40,25 @@ int main() {
     	printf("remove success\n");
     }*/
 
-    char *loc="/home/user/os_project/fp.txt";
-    if(closeAndSave_KeyValueDB(loc)<0){
-        perror("close\n");
+    char *loc="fp.txt";
+    if(save_KeyValueDB(loc)<0){
+        perror("close");
         exit(-1);
+    }
+    if(remove_elem(3) < 0) {
+        perror("remove");
+        exit(-1);
+    } else {
+        printf("remove success\n");
+    }
+    if(load_KeyValueDB(loc)<0){
+        perror("load");
+        exit(-1);
+    }
+    if(remove_elem(3) < 0) {
+        perror("remove");
+        exit(-1);
+    } else {
+        printf("remove success\n");
     }
 }

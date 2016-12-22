@@ -23,6 +23,7 @@ int remove_elem(int key);
 int close_KeyValueDB();
 int save_KeyValueDB(char *filename);
 int closeAndSave_KeyValueDB(char *filename);
+int load_KeyValueDB(char *filename);
 
 #endif
 

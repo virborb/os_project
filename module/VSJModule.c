@@ -180,6 +180,7 @@ static ssize_t dev_read(struct file *filep, char *buffer, size_t len, loff_t *of
      return 0;
     }
     if(getSize) {
+        cplen = len > (sizeof(int) + sizeof(size_t)) ? (sizeof(int) + sizeof(size_t)) : len;
         printk(KERN_INFO "VSJModule: save: key: %d", saver[iteratorKey]->key);
         err = copy_to_user(buffer + sizeof(int), &(saver[iteratorKey]->size), sizeof(size_t));
         err += copy_to_user(buffer, &(saver[iteratorKey]->key), sizeof(int));
@@ -319,13 +320,14 @@ static ssize_t dev_write(struct file *filep, const char *buffer, size_t len, lof
 static void resetIterations(void){
       iteratorPID=-1;
       iteratorKey=-1;
-      if(kfree != NULL)
+      if(saver != NULL)
         kfree(saver);
  }
 
 
 static int lockAndRead(void) {
-
+    int i=0;
+    struct hashed_object *p;
     iteratorKey=0;
     iteratorPID=task_pid_nr(current);
 
@@ -333,9 +335,8 @@ static int lockAndRead(void) {
 //      rhashtable_walk_enter(ht,iter) UNWORKS ON LINUX 4.4
     rhashtable_walk_init(ht, iter);
     if(iter!=NULL)
-      printk(KERN_INFO "iter != Null && ht = %d",iter->ht);
+      printk(KERN_INFO "iter != Null && ht = %p",iter->ht);
     rhashtable_walk_start(iter);
-    struct hashed_object *p;
     p = rhashtable_walk_next(iter);
 
     /* if(p!=NULL) {
@@ -346,7 +347,6 @@ static int lockAndRead(void) {
     }*/
     iteratorLength = atomic_read(&ht->nelems);
     saver=kmalloc(sizeof(struct hashed_object*)*iteratorLength, GFP_KERNEL);
-    int i=0;
     while(p!=NULL) {
       saver[i]=p;
     //  printk(KERN_INFO "VSJ LockAndRead: iterator %s, nele : %d\n",saver[i]->value,iteratorLength);

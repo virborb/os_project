@@ -109,9 +109,9 @@ int closeAndSave_KeyValueDB(char *filename) {
 
 }
 
-int readNext(void **buffer, int *len){
+int readNext(char **buffer, int *len){
 
-	int val_len= 0;
+	size_t val_len= 0;
 	int key = 0;
 	*len = sizeof(int) + sizeof(size_t);
 	*buffer = malloc(*len);
@@ -130,18 +130,16 @@ int readNext(void **buffer, int *len){
 			return 0;
 	}
 	*len += val_len;
-	fprintf(stdout, "Returned from iterator:");
- 	printf("key: %d, size:%d, value:%s\n", key, val_len, *buffer + sizeof(int) + sizeof(size_t));
- 	fprintf(stdout, "\n");
  	return 1;
 }
 
 int save_KeyValueDB(char *filename) {
 	int tot_len = 0;
-	int savefd = open(filename, O_WRONLY | O_CREAT);
-	void *buf = NULL;
+	int savefd = open(filename, O_WRONLY | O_CREAT | O_TRUNC);
+	char *buf = NULL;
 	if(savefd<0) {
-		fprintf(stderr, "couldnt save %s\n", filename);	
+		fprintf(stderr, "couldnt save %s\n", filename);
+		return -1;
 	}
 	char *str = malloc(4);
 
@@ -149,45 +147,67 @@ int save_KeyValueDB(char *filename) {
 	int ff=0;
 	ff=write(fd, str, sizeof(int));
 	if(ff < 0) {
-		fprintf(stderr, "KVL: saveKVDB: %s\n", strerror(ff) );
+		fprintf(stderr, "KVL: saveKVDB: %s\n", strerror(ff));
+		return -1;
 	}
 	int q=1;
 	while (q){
 		q=readNext(&buf, &tot_len);
-		printf("tot_len: %d\n", tot_len);
-		write(savefd, buf, tot_len);
+		if(q) {
+			write(savefd, buf, tot_len);
+		}
 		free(buf);
 	}
+	ff = close(savefd);
+	if(ff < 0) {
+		return -1;
+	}
+	return 0;
 }
 
 int load_KeyValueDB(char *filename) {
-	int val_len = 0;
+	size_t val_len = 0;
 	int key = 0;
+	int err;
 	int len = sizeof(int) + sizeof(size_t);
-	void *buf = NULL;
+	char *buf = NULL;
 	int loadfd = open(filename, O_RDONLY);
 	if(loadfd<0) {
-		fprintf(stderr, "couldnt load %s\n", filename);	
-	}
-	buf = malloc(len);
-	if(buf == NULL) {
+		fprintf(stderr, "couldnt load %s\n", filename);
 		return -1;
 	}
-	int err = read(loadfd,buf, len);
+	while(1) {
+		buf = malloc(len);
+		if(buf == NULL) {
+			return -1;
+		}
+		err = read(loadfd,buf, len);
+		if(err == 0) {
+			break;
+		}
+		if(err < 0){
+			return -1;
+		}
+		memcpy(&key, buf, sizeof(int));
+		memcpy(&val_len, buf + sizeof(int), sizeof(size_t));
+		free(buf);
+		buf = malloc(val_len);
+		if(buf == NULL) {
+			return -1;
+		}
+		err = read(loadfd,buf, val_len);
+		if(err<0){
+			return -1;
+		}
+		err = insert_elem(key, buf, val_len);
+		if(err<0){
+			return -1;
+		}
+		free(buf);
+	}
+	err = close(loadfd);
 	if(err<0){
 		return -1;
 	}
-	memcpy(&key, buf, sizeof(int));
-	memcpy(&val_len, buf + sizeof(int), sizeof(size_t));
-	free(buf);
-	buf = malloc(val_len);
-	if(buf == NULL) {
-		return -1;
-	}
-	err = read(loadfd,buf, val_len);
-	if(err<0){
-		return -1;
-	}
-	printf("key: %d, size:%d, value:%s\n", key, val_len, buf);
-	return insert_elem(key, buf, val_len); 
+	return 1;
 }

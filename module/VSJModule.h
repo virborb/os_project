@@ -36,7 +36,7 @@ static void resetIterations(void);
 static inline struct hashed_object *KVDB_lookup(
         struct rhashtable *ht, const int *key,
 	    const struct rhashtable_params params) {
-    return (struct hashed_object*) rhashtable_lookup(ht, key, params);
+    return (struct hashed_object*) rhashtable_lookup_fast(ht, key, params);
 }
 
 static inline struct hashed_key *getkey(struct rhashtable *keytable, const pid_t pid,
@@ -45,6 +45,7 @@ static inline struct hashed_key *getkey(struct rhashtable *keytable, const pid_t
     struct hashed_key *keystruct;
     keystruct = (struct hashed_key*) rhashtable_lookup_fast(keytable, &pid, keytparams);
     if(keystruct == NULL) {
+        mutex_unlock(&keytable->mutex);
         return NULL;
     }
     rhashtable_remove_fast(keytable, &(keystruct->node), keytparams);
@@ -64,7 +65,7 @@ static inline int addkey (int key, struct rhashtable *keytable, const pid_t pid,
     obj->pid = pid;
     mutex_lock(&keytable->mutex);
     ret = rhashtable_insert_fast(keytable, &(obj->node), keytparams);
-    if(ret != 0){
+    if(ret != 0) {
         kfree(obj);
     }
     mutex_unlock(&keytable->mutex);

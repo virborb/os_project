@@ -17,7 +17,7 @@ int main() {
     printf("Type in a short string to send to the kernel module:\n");
    scanf("%[^\n]%*c", str);                // Read in a string (with spaces)
    printf("Writing message to the device [%s].\n", str);
-    if(insert_elem(3, str, strlen(str)) < 0) {
+    if(insert_elem(3,   str, strlen(str)) < 0) {
     	perror("insert");
     	exit(-1);
     } else {
@@ -44,21 +44,30 @@ int main() {
     if(save_KeyValueDB(loc)<0){
         perror("close");
         exit(-1);
+    }else {
+      printf("save success\n");
     }
+
     if(remove_elem(3) < 0) {
         perror("remove");
         exit(-1);
     } else {
         printf("remove success\n");
     }
-    if(load_KeyValueDB(loc)<0){
+    /*    if(load_KeyValueDB(loc)<0) {
         perror("load");
         exit(-1);
-    }
-    if(remove_elem(3) < 0) {
+    }*/
+   /* if(remove_elem(3) < 0) {
         perror("remove");
         exit(-1);
     } else {
         printf("remove success\n");
+    }*/
+
+    if(close_KeyValueDB()==0){
+        printf("Close success\n");
+    }else{
+        printf("Closed KDB in TEST");
     }
 }

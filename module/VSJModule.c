@@ -23,7 +23,6 @@ static int    numberOpens = 0;              ///< Counts the number of times the 
 static struct class*  charClass  = NULL; ///< The device-driver class struct pointer
 static struct device* charDevice = NULL; ///< The device-driver device struct pointer
 static struct rhashtable *ht, *keytable;
-static struct rw_semaphore sem;
 
 static struct rhashtable_iter *iter;       // to iterate ht
 static struct hashed_object **saver;    // to list ht
@@ -126,7 +125,6 @@ static int __init onload(void) {
    }
    mutex_init(&save_mutex);
    mutex_init(&del_mutex);
-   init_rwsem(&sem);
    printk(KERN_INFO "VSJModule: device class created correctly\n");
 
     return 0;
@@ -216,7 +214,6 @@ static ssize_t dev_read(struct file *filep, char *buffer, size_t len, loff_t *of
    }
    key = keyobj->key;
    kfree(keyobj);
-   down_read(&sem);
    rcu_read_lock();
    obj = KVDB_lookup(ht, &key, params);
    if(obj == NULL) {
@@ -231,7 +228,6 @@ static ssize_t dev_read(struct file *filep, char *buffer, size_t len, loff_t *of
        return -EFAULT;
    }
    rcu_read_unlock();
-   up_read(&sem);
    return cplen;
 }
 
@@ -458,7 +454,6 @@ static int KVDB_remove (int *key){
     if(obj == NULL){
         return -ENOENT;
     }
-    down_write(&sem);
     ret = rhashtable_remove_fast(ht, &(obj->node), params);
     if(ret == 0){
         synchronize_rcu();
@@ -466,7 +461,6 @@ static int KVDB_remove (int *key){
         kfree(obj);
     }
     mutex_unlock(&del_mutex);
-    up_write(&sem);
     return ret;
 }
 

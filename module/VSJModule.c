@@ -23,6 +23,7 @@ static int    numberOpens = 0;              ///< Counts the number of times the 
 static struct class*  charClass  = NULL; ///< The device-driver class struct pointer
 static struct device* charDevice = NULL; ///< The device-driver device struct pointer
 static struct rhashtable *ht, *keytable;
+static struct rw_semaphore sem;
 
 static struct rhashtable_iter *iter;       // to iterate ht
 static struct hashed_object **saver;    // to list ht
@@ -125,6 +126,7 @@ static int __init onload(void) {
    }
    mutex_init(&save_mutex);
    mutex_init(&del_mutex);
+   init_rwsem(&sem);
    printk(KERN_INFO "VSJModule: device class created correctly\n");
 
     return 0;
@@ -133,18 +135,33 @@ static int __init onload(void) {
 /** @brief Destroys character device and rhashtables.
  */
 static void __exit onunload(void) {
+   printk(KERN_INFO "VSJMod: on Unload started\n");
+
    device_destroy(charClass, MKDEV(majorNumber, 0));
    class_unregister(charClass);
    class_destroy(charClass);
-   unregister_chrdev(majorNumber, DEVICE_NAME);
-   rhashtable_free_and_destroy(ht, &KVDB_free_fn, NULL);
-   rhashtable_free_and_destroy(keytable, &keyfree, NULL);
-   kfree(keytable);
-   kfree(ht);
-   if(iteratorKey == -1) {
-       kfree(saver);
-   }
+
+  unregister_chrdev(majorNumber, DEVICE_NAME);
+  printk(KERN_INFO "VSJMod: on Unload destroyed charclass\n");
+  rhashtable_free_and_destroy(ht, &KVDB_free_fn, NULL);
+  printk(KERN_INFO "VSJMod: on Unload after freenDestroy 1 \n");
+  
+  rhashtable_free_and_destroy(keytable, &keyfree, NULL); //ORIGINAL 
+  
+ // rhashtable_free_and_destroy(keytable, &KVDB_free_fn, NULL); //new
+  printk(KERN_INFO "VSJMod: on Unload after freenDestroy 2\n");
+
+
+  kfree(keytable);
+  kfree(ht);
+  printk(KERN_INFO "VSJModule: unloaded HT\n");
+
+  if(iteratorKey == -1) {
+    kfree(saver);
+  }
    printk(KERN_INFO "VSJModule: Goodbye from the LKM!\n");
+   printk(KERN_INFO "VSJModule: unloaded ALL\n");
+
 }
 
 /** @brief The device open function that is called each time the device is opened
@@ -209,23 +226,27 @@ static ssize_t dev_read(struct file *filep, char *buffer, size_t len, loff_t *of
 
 
    keyobj = getkey(keytable, pid, ktparams);
-   if(keyobj == NULL){
+   if(keyobj == NULL) {
        return -EBADE;
    }
    key = keyobj->key;
    kfree(keyobj);
+   down_read(&sem);
    rcu_read_lock();
    obj = KVDB_lookup(ht, &key, params);
    if(obj == NULL) {
+       up_read(&sem);
        return -ENOKEY;
    }
    cplen = len > obj->size ? obj->size : len;
    err = copy_to_user(buffer, obj->value, cplen);
    if(err) {
        rcu_read_unlock();
+       up_read(&sem);
        return -EFAULT;
    }
    rcu_read_unlock();
+   up_read(&sem);
    return cplen;
 }
 
@@ -371,7 +392,7 @@ static int lockAndRead(void) {
     }
     rhashtable_walk_stop(iter);
     rhashtable_walk_exit(iter);
-
+    kfree(iter);
     iter = NULL;
     //nn:aa;:
     mutex_unlock(&save_mutex);
@@ -452,6 +473,7 @@ static int KVDB_remove (int *key){
     if(obj == NULL){
         return -ENOENT;
     }
+    down_write(&sem);
     ret = rhashtable_remove_fast(ht, &(obj->node), params);
     if(ret == 0){
         synchronize_rcu();
@@ -459,6 +481,7 @@ static int KVDB_remove (int *key){
         kfree(obj);
     }
     mutex_unlock(&del_mutex);
+    up_write(&sem);
     return ret;
 }
 
@@ -472,8 +495,16 @@ static void KVDB_free_fn(void *ptr, void *arg) {
 /** @brief Free function for get request rhashtable
  */
 static void keyfree(void *ptr, void *arg){
+ // kfree(&((struct hashed_key *)ptr)->value);
     kfree(ptr);
 }
 
+
+/** @brief Free function for get request rhashtable
+ */
+/*static void keyfree(void *ptr, void *arg){
+  kfree(&((struct hashed_object *)ptr)->value);
+    kfree(ptr);
+}*/
 module_init(onload);
 module_exit(onunload);

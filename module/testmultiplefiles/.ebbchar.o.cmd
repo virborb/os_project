@@ -1,1 +1,0 @@
-cmd_/home/simon/Documents/operativsys/os_project/module/testmultiplefiles/ebbchar.o := ld -m elf_x86_64   -r -o /home/simon/Documents/operativsys/os_project/module/testmultiplefiles/ebbchar.o /home/simon/Documents/operativsys/os_project/module/testmultiplefiles/ebbchara.o /home/simon/Documents/operativsys/os_project/module/testmultiplefiles/ebbcharb.o 

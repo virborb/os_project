@@ -1,1 +1,0 @@
-cmd_/home/simon/Documents/operativsys/os_project/module/testmultiplefiles/built-in.o :=  rm -f /home/simon/Documents/operativsys/os_project/module/testmultiplefiles/built-in.o; ar rcsD /home/simon/Documents/operativsys/os_project/module/testmultiplefiles/built-in.o

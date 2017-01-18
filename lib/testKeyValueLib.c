@@ -47,8 +47,6 @@ int main() {
     printf("Inserts was successful\n");
     char test[BUFLEN] = {0};
     char *retptr = NULL;
-    printf("Press ENTER to read back from the device...\n");
-    getchar();
     for(int i = 0; i < 20; i++){
         retptr = get_elem(keys[i], test, BUFLEN);
         if(retptr == NULL) {

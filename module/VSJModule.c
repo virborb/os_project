@@ -137,7 +137,7 @@ static void __exit onunload(void) {
 
         unregister_chrdev(majorNumber, DEVICE_NAME);
         printk(KERN_INFO "VSJMod: on Unload destroyed charclass\n");
-        /*rhashtable_free_and_destroy(ht, &KVDB_free_fn, NULL);
+        rhashtable_free_and_destroy(ht, &KVDB_free_fn, NULL);
         printk(KERN_INFO "VSJMod: on Unload after freenDestroy 1 \n");
 
         rhashtable_free_and_destroy(keytable, NULL, NULL); //ORIGINAL
@@ -147,9 +147,9 @@ static void __exit onunload(void) {
 
 
         kfree(keytable);
-        kfree(ht);*/
-        manualFree(ht, &KVDB_free_fn, sizeof(struct hashed_object*), params);
-        manualFree(keytable, NULL, sizeof(struct hashed_key*), ktparams);
+        kfree(ht);
+        //manualFree(ht, &KVDB_free_fn, sizeof(struct hashed_object*), params);
+        //manualFree(keytable, NULL, sizeof(struct hashed_key*), ktparams);
         printk(KERN_INFO "VSJModule: unloaded HT\n");
 
   if(iteratorKey == -1) {
@@ -491,7 +491,7 @@ static int KVDB_remove (int *key){
  */
 static void KVDB_free_fn(void *ptr, void *arg) {
         printk("VSJModule: freeing ht key: %d\n", ((struct hashed_object *)ptr)->key);
-    kfree(&((struct hashed_object *)ptr)->value);
+    kfree(((struct hashed_object *)ptr)->value);
     kfree(ptr);
 }
 
@@ -503,34 +503,47 @@ static void KVDB_keyfree(void *ptr, void *arg){
     kfree(ptr);
 }
 
-//FIXA
+/*//FIXA
 static void manualFree(struct rhashtable *hashtab,
                         void (*free_fn)(void *ptr, void *arg), size_t valsize,
                         const struct rhashtable_params parm){
         int i = 0;
+        int j = 1;
         void* p = NULL;
         void ** values = NULL;
+        struct rhashtable_iter it;
+        printk("VSJ: manualFree %d \n", j++);
         iteratorLength = atomic_read(&hashtab->nelems);
+        printk("VSJ: manualFree %d \n", j++);
         if(iteratorLength > 0){
-                rhashtable_walk_init(hashtab, iter);
-                if(iter==NULL){
+                printk("VSJ: manualFree %d \n", j++);
+                rhashtable_walk_init(hashtab, &it);
+                if(0 > rhashtable_walk_init(hashtab, &it)){
                         return;
                 }
-                rhashtable_walk_start(iter);
-                p = rhashtable_walk_next(iter);
+                printk("VSJ: manualFree %d \n", j++);
+                rhashtable_walk_start(&it);
+                printk("VSJ: manualFree %d \n", j++);
+                p = rhashtable_walk_next(&it);
+                printk("VSJ: manualFree %d \n", j++);
                 iteratorLength = atomic_read(&hashtab->nelems);
+                printk("VSJ: manualFree %d \n", j++);
                 values=kmalloc(valsize *iteratorLength, GFP_KERNEL);
+                printk("VSJ: manualFree %d \n", j++);
                 while(p!=NULL) {
                         values[i++]=p;
-                        p=rhashtable_walk_next(iter);
+                        p=rhashtable_walk_next(&it);
                 }
-                rhashtable_walk_stop(iter);
-                rhashtable_walk_exit(iter);
+                printk("VSJ: manualFree %d \n", j++);
+                rhashtable_walk_stop(&it);
+                printk("VSJ: manualFree %d \n", j++);
+                rhashtable_walk_exit(&it);
+                printk("VSJ: manualFree %d \n", j++);
         }
-        printk("mgfsdfgde  \n");
+        printk("VSJ: manualFree %d \n", j++);
         for(i = 0; i < iteratorLength; ++i){
                 p = values[i];
-                printk("manualFree %d \n", i);
+                printk("VSJ manualFree i :%d \n", i);
                 rhashtable_remove_fast(hashtab, (p + parm.head_offset), parm);
                 if(free_fn != NULL){
                         free_fn(p, NULL);
@@ -543,7 +556,7 @@ static void manualFree(struct rhashtable *hashtab,
         if(values != NULL){
                 kfree(values);
         }
-}
+}*/
 
 
 /** @brief Free function for get request rhashtable

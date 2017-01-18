@@ -29,9 +29,12 @@ static int    setupNewKVDB(void);
 static int KVDB_add (int key, void *val, size_t size);
 static int KVDB_remove (int *key);
 static void KVDB_free_fn(void *ptr, void *arg);
-static void keyfree(void *ptr, void *arg);
+static void KVDB_keyfree(void *ptr, void *arg);
 static int lockAndRead(void);
 static void resetIterations(void);
+static void manualFree(struct rhashtable *hashtab,
+                        void (*free_fn)(void *ptr, void *arg), size_t valsize,
+                        const struct rhashtable_params parm);
 
 static inline struct hashed_object *KVDB_lookup(
         struct rhashtable *ht, const int *key,
@@ -41,16 +44,16 @@ static inline struct hashed_object *KVDB_lookup(
 
 static inline struct hashed_key *getkey(struct rhashtable *keytable, const pid_t pid,
                         const struct rhashtable_params keytparams) {
-    mutex_lock(&keytable->mutex);
-    struct hashed_key *keystruct;
-    keystruct = (struct hashed_key*) rhashtable_lookup_fast(keytable, &pid, keytparams);
-    if(keystruct == NULL) {
+        struct hashed_key *keystruct;
+        mutex_lock(&keytable->mutex);
+        keystruct = (struct hashed_key*) rhashtable_lookup_fast(keytable, &pid, keytparams);
+        if(keystruct == NULL) {
+                mutex_unlock(&keytable->mutex);
+                return NULL;
+        }
+        rhashtable_remove_fast(keytable, &(keystruct->node), keytparams);
         mutex_unlock(&keytable->mutex);
-        return NULL;
-    }
-    rhashtable_remove_fast(keytable, &(keystruct->node), keytparams);
-    mutex_unlock(&keytable->mutex);
-    return keystruct;
+        return keystruct;
 }
 
 static inline int addkey (int key, struct rhashtable *keytable, const pid_t pid,

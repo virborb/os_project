@@ -87,10 +87,6 @@ static int __init onload(void) {
     }
 
     printk(KERN_INFO "VSJ: max_val_size: %lu\n", max_val_size);
-    if(file_location != NULL){
-        printk(KERN_INFO "VSJ: file_location: %s\n", file_location);
-    }
-
 
     // Try to dynamically allocate a major number for the device -- more difficult but worth it
     majorNumber = register_chrdev(0, DEVICE_NAME, &fops);
@@ -133,26 +129,28 @@ static int __init onload(void) {
 /** @brief Destroys character device and rhashtables.
  */
 static void __exit onunload(void) {
-   printk(KERN_INFO "VSJMod: on Unload started\n");
+        printk(KERN_INFO "VSJMod: on Unload started\n");
 
-   device_destroy(charClass, MKDEV(majorNumber, 0));
-   class_unregister(charClass);
-   class_destroy(charClass);
+        device_destroy(charClass, MKDEV(majorNumber, 0));
+        class_unregister(charClass);
+        class_destroy(charClass);
 
-  unregister_chrdev(majorNumber, DEVICE_NAME);
-  printk(KERN_INFO "VSJMod: on Unload destroyed charclass\n");
-  rhashtable_free_and_destroy(ht, &KVDB_free_fn, NULL);
-  printk(KERN_INFO "VSJMod: on Unload after freenDestroy 1 \n");
-  
-  rhashtable_free_and_destroy(keytable, &keyfree, NULL); //ORIGINAL 
-  
- // rhashtable_free_and_destroy(keytable, &KVDB_free_fn, NULL); //new
-  printk(KERN_INFO "VSJMod: on Unload after freenDestroy 2\n");
+        unregister_chrdev(majorNumber, DEVICE_NAME);
+        printk(KERN_INFO "VSJMod: on Unload destroyed charclass\n");
+        /*rhashtable_free_and_destroy(ht, &KVDB_free_fn, NULL);
+        printk(KERN_INFO "VSJMod: on Unload after freenDestroy 1 \n");
+
+        rhashtable_free_and_destroy(keytable, NULL, NULL); //ORIGINAL
+
+        //rhashtable_free_and_destroy(keytable, &KVDB_free_fn, NULL); //new
+        printk(KERN_INFO "VSJMod: on Unload after freenDestroy 2\n");
 
 
-  kfree(keytable);
-  kfree(ht);
-  printk(KERN_INFO "VSJModule: unloaded HT\n");
+        kfree(keytable);
+        kfree(ht);*/
+        manualFree(ht, &KVDB_free_fn, sizeof(struct hashed_object*), params);
+        manualFree(keytable, NULL, sizeof(struct hashed_key*), ktparams);
+        printk(KERN_INFO "VSJModule: unloaded HT\n");
 
   if(iteratorKey == -1) {
     kfree(saver);
@@ -169,6 +167,7 @@ static void __exit onunload(void) {
  */
 static int dev_open(struct inode *inodep, struct file *filep){
    numberOpens++;
+   try_module_get(THIS_MODULE);
    nonseekable_open(inodep, filep);
    printk(KERN_INFO "VSJModule: Device has been opened %d time(s)\n", numberOpens);
    return 0;
@@ -401,8 +400,18 @@ static int lockAndRead(void) {
  *  @param filep A pointer to a file object (defined in linux/fs.h)
  */
 static int dev_release(struct inode *inodep, struct file *filep){
-   printk(KERN_INFO "VSJModule: Device successfully closed\n");
-   return 0;
+        pid_t pid = task_pid_nr(current);
+        struct hashed_key *key;
+        if(iteratorPID == task_pid_nr(current)){
+                resetIterations();
+        }
+        key = getkey(keytable, pid, ktparams);
+        if(key != NULL){
+                kfree(key);
+        }
+        printk(KERN_INFO "VSJModule: Device successfully closed\n");
+        module_put(THIS_MODULE);
+        return 0;
 }
 
 /** @brief Sets up the rhastable for the key-value database and
@@ -481,15 +490,59 @@ static int KVDB_remove (int *key){
 /** @brief Free function for the key-value rhashtable
  */
 static void KVDB_free_fn(void *ptr, void *arg) {
+        printk("VSJModule: freeing ht key: %d\n", ((struct hashed_object *)ptr)->key);
     kfree(&((struct hashed_object *)ptr)->value);
     kfree(ptr);
 }
 
 /** @brief Free function for get request rhashtable
  */
-static void keyfree(void *ptr, void *arg){
+static void KVDB_keyfree(void *ptr, void *arg){
+        printk("VSJModule: freeing keyt key: %d\n", ((struct hashed_key *)ptr)->pid);
  // kfree(&((struct hashed_key *)ptr)->value);
     kfree(ptr);
+}
+
+//FIXA
+static void manualFree(struct rhashtable *hashtab,
+                        void (*free_fn)(void *ptr, void *arg), size_t valsize,
+                        const struct rhashtable_params parm){
+        int i = 0;
+        void* p = NULL;
+        void ** values = NULL;
+        iteratorLength = atomic_read(&hashtab->nelems);
+        if(iteratorLength > 0){
+                rhashtable_walk_init(hashtab, iter);
+                if(iter==NULL){
+                        return;
+                }
+                rhashtable_walk_start(iter);
+                p = rhashtable_walk_next(iter);
+                iteratorLength = atomic_read(&hashtab->nelems);
+                values=kmalloc(valsize *iteratorLength, GFP_KERNEL);
+                while(p!=NULL) {
+                        values[i++]=p;
+                        p=rhashtable_walk_next(iter);
+                }
+                rhashtable_walk_stop(iter);
+                rhashtable_walk_exit(iter);
+        }
+        printk("mgfsdfgde  \n");
+        for(i = 0; i < iteratorLength; ++i){
+                p = values[i];
+                printk("manualFree %d \n", i);
+                rhashtable_remove_fast(hashtab, (p + parm.head_offset), parm);
+                if(free_fn != NULL){
+                        free_fn(p, NULL);
+                } else {
+                        kfree(p);
+                }
+        }
+        rhashtable_free_and_destroy(hashtab, NULL, NULL);
+        kfree(hashtab);
+        if(values != NULL){
+                kfree(values);
+        }
 }
 
 

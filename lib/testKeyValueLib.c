@@ -162,6 +162,17 @@ int main() {
         }
     }
 
+    for(int i = 0; i < 20; i++){
+        if(remove_elem(keys[i]) < 0) {
+            snprintf(errstr, BUFLEN - 1,"remove_elem failed for key %d with Error\n",
+                    keys[i]);
+            errorExit(errstr, 1);
+        } else if(!(NULL == get_elem(3, test, strlen(str[i])) && errno == ENOKEY)){
+            snprintf(errstr, BUFLEN - 1,"get_elem failed for key %d ,"
+                    " key still exists\n", keys[i]);
+            errorExit(errstr, 0);
+        }
+    }
 
     if(close_KeyValueDB()==0){
         printf("close_KeyValueDB ran without errors\n");

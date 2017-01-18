@@ -87,7 +87,8 @@ int remove_elem(int key) {
 	return 0;
 }
 
-
+/** @brief Closes the key-value database.
+ */
 int close_KeyValueDB(){
 	int cl = close(fd);
 	if(cl!=0){
@@ -97,6 +98,8 @@ int close_KeyValueDB(){
 	return 0;
 }
 
+/** @brief Saves and closes the key-value database.
+ */
 int closeAndSave_KeyValueDB(char *filename) {
 
 	save_KeyValueDB(filename);
@@ -109,6 +112,10 @@ int closeAndSave_KeyValueDB(char *filename) {
 
 }
 
+/** @brief Reads the next key-value pair.
+ *  @params buffer where to store the key-value pair.
+ *  @params len the size of the buffer.
+*/
 int readNext(char **buffer, int *len){
 
 	size_t val_len= 0;
@@ -133,6 +140,9 @@ int readNext(char **buffer, int *len){
  	return 1;
 }
 
+/** @brief Saves the key value database.
+ *  @params filename where to save the database.
+ */
 int save_KeyValueDB(char *filename) {
 	int tot_len = 0;
 	int savefd = open(filename, O_WRONLY | O_CREAT | O_TRUNC);
@@ -165,6 +175,9 @@ int save_KeyValueDB(char *filename) {
 	return 0;
 }
 
+/** @brief Loads the key value database from file.
+ *  @params filename where the file is located.
+ */
 int load_KeyValueDB(char *filename) {
 	size_t val_len = 0;
 	int key = 0;

@@ -1,10 +1,10 @@
-#include <linux/module.h>  /* Needed by all kernel modules */
-#include <linux/kernel.h>  /* Needed for loglevels (KERN_WARNING, KERN_EMERG, KERN_INFO, etc.) */
-#include <linux/init.h>    /* Needed for __init and __exit macros. */
+#include <linux/module.h>
+#include <linux/kernel.h>
+#include <linux/init.h>
 #include <linux/sched.h>
-#include <linux/device.h>         // Header to support the kernel Driver Model
-#include <linux/fs.h>             // Header for the Linux file system support
-#include <asm/uaccess.h>          // Required for the copy to user function
+#include <linux/device.h>
+#include <linux/fs.h>
+#include <asm/uaccess.h>
 #include <linux/rwsem.h>
 
 #include <linux/rhashtable.h>
@@ -52,10 +52,6 @@ static int getSize = 1;
 module_param(max_val_size, ulong, 0644);
 MODULE_PARM_DESC(max_val_size, "Maximum size of the value");
 
-/** @brief Devices are represented as file structure in the kernel. The file_operations structure from
- *  /linux/fs.h lists the callback functions that you wish to associated with your file operations
- *  using a C99 syntax structure. char devices usually implement open, read, write and release calls
- */
 static struct file_operations fops =
 {
         .owner = THIS_MODULE,
@@ -427,27 +423,21 @@ static int KVDB_remove (int *key){
         int j;
         j=1;
         mutex_lock(&ht_mutex);
-        printk("VSJ: %d", j);
         if(iteratorPID>0){
                 mutex_unlock(&ht_mutex);
                 return -EBUSY;
         }
-                printk("VSJ: %d", j);
         obj = rhashtable_lookup_fast(ht, key, params);
-                printk("VSJ: %d", j);
         if(obj == NULL){
                 mutex_unlock(&ht_mutex);
                 return -ENOENT;
         }
-                printk("VSJ: %d", j);
         ret = rhashtable_remove_fast(ht, &(obj->node), params);
-                printk("VSJ: %d", j);
         if(ret == 0){
                 synchronize_rcu();
                 kfree(obj->value);
                 kfree(obj);
         }
-                printk("VSJ: %d", j);
         mutex_unlock(&ht_mutex);
         return ret;
 }

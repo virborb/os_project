@@ -19,33 +19,31 @@ MODULE_DESCRIPTION("A Key-Value DB");
 MODULE_VERSION("0.1");
 
 static int    majorNumber;                  ///< Stores the device number -- determined automatically
-static int    numberOpens = 0;              ///< Counts the number of times the device is opened
 static struct class*  charClass  = NULL; ///< The device-driver class struct pointer
 static struct device* charDevice = NULL; ///< The device-driver device struct pointer
 static struct rhashtable *ht, *keytable;
 
 static struct rhashtable_iter *iter;       // to iterate ht
 static struct hashed_object **saver;    // to list ht
-static struct mutex save_mutex;
-static struct mutex del_mutex;
+static struct mutex ht_mutex;
+static struct mutex kt_mutex;
 
 static struct rhashtable_params params = {
-    .head_offset = offsetof(struct hashed_object, node),
-    .key_offset = offsetof(struct hashed_object, key),
-    .key_len = sizeof(int),
-    .hashfn = jhash,
-    .nulls_base = (1U << RHT_BASE_SHIFT),
+        .head_offset = offsetof(struct hashed_object, node),
+        .key_offset = offsetof(struct hashed_object, key),
+        .key_len = sizeof(int),
+        .hashfn = jhash,
+        .nulls_base = (1U << RHT_BASE_SHIFT),
 };
 static struct rhashtable_params ktparams = {
-    .head_offset = offsetof(struct hashed_key, node),
-    .key_offset = offsetof(struct hashed_key, pid),
-    .key_len = sizeof(pid_t),
-    .hashfn = jhash,
-    .nulls_base = (1U << RHT_BASE_SHIFT),
+        .head_offset = offsetof(struct hashed_key, node),
+        .key_offset = offsetof(struct hashed_key, pid),
+        .key_len = sizeof(pid_t),
+        .hashfn = jhash,
+        .nulls_base = (1U << RHT_BASE_SHIFT),
 };
 
 static unsigned long max_val_size = 0;
-static char *file_location = NULL;
 
 static pid_t iteratorPID;
 static int iteratorKey,iteratorLength;
@@ -53,8 +51,6 @@ static int getSize = 1;
 
 module_param(max_val_size, ulong, 0644);
 MODULE_PARM_DESC(max_val_size, "Maximum size of the value");
-module_param(file_location, charp, 0644);
-MODULE_PARM_DESC(file_location, "Where the saved key value store will be read from.");
 
 /** @brief Devices are represented as file structure in the kernel. The file_operations structure from
  *  /linux/fs.h lists the callback functions that you wish to associated with your file operations
@@ -62,101 +58,72 @@ MODULE_PARM_DESC(file_location, "Where the saved key value store will be read fr
  */
 static struct file_operations fops =
 {
-    .open = dev_open,
-    .read = dev_read,
-    .write = dev_write,
-    .release = dev_release,
+        .owner = THIS_MODULE,
+        .open = dev_open,
+        .read = dev_read,
+        .write = dev_write,
+        .release = dev_release,
 };
 /** @brief Creates a character device and rhashtables. Set
  *  max value size.
  */
 static int __init onload(void) {
-    int ret;
-
-    printk(KERN_INFO "VSJModule: Initializing the VSJModule LKM\n");
-    ret = setupNewKVDB();
-    if(ret == 0){
-        printk(KERN_INFO "VSJModule : kvdb returned \n");
-    } else {
-        printk("VSJModule : kvdb not pos\n");
-        return ret;
-    }
-
-    if(max_val_size > SIZE_MAX) {
-     max_val_size = SIZE_MAX;
-    }
-
-    printk(KERN_INFO "VSJ: max_val_size: %lu\n", max_val_size);
-
-    // Try to dynamically allocate a major number for the device -- more difficult but worth it
-    majorNumber = register_chrdev(0, DEVICE_NAME, &fops);
-    if (majorNumber<0){
-        printk(KERN_ALERT "VSJModule failed to register a major number\n");
-        kfree(ht);
-        kfree(keytable);
-        return majorNumber;
-    }
-    printk(KERN_INFO "VSJModule: registered correctly with major number %d\n", majorNumber);
-
-   // Register the device class
-   charClass = class_create(THIS_MODULE, CLASS_NAME);
-   if (IS_ERR(charClass)){
-      unregister_chrdev(majorNumber, DEVICE_NAME);
-      printk(KERN_ALERT "Failed to register device class\n");
-      kfree(ht);
-      kfree(keytable);
-      return PTR_ERR(charClass);          // Correct way to return an error on a pointer
-   }
-   printk(KERN_INFO "VSJModule: device class registered correctly\n");
-
-   // Register the device driver
-   charDevice = device_create(charClass, NULL, MKDEV(majorNumber, 0), NULL, DEVICE_NAME);
-   if (IS_ERR(charDevice)){
-      class_destroy(charClass);
-      unregister_chrdev(majorNumber, DEVICE_NAME);
-      kfree(ht);
-      kfree(keytable);
-      printk(KERN_ALERT "Failed to create the device\n");
-      return PTR_ERR(charDevice);
-   }
-   mutex_init(&save_mutex);
-   mutex_init(&del_mutex);
-   printk(KERN_INFO "VSJModule: device class created correctly\n");
-
-    return 0;
+        int ret;
+        printk(KERN_INFO "VSJModule: Initializing the VSJModule LKM\n");
+        ret = setupNewKVDB();
+        if(ret != 0) {
+                printk(KERN_ERR "VSJModule : Error setting upp the hashtable\n");
+                return ret;
+        }
+        if(max_val_size > SIZE_MAX) {
+                max_val_size = SIZE_MAX;
+        }
+        majorNumber = register_chrdev(0, DEVICE_NAME, &fops);
+        if (majorNumber<0){
+                printk(KERN_ERR "VSJModule: failed to register a major number\n");
+                kfree(ht);
+                kfree(keytable);
+                return majorNumber;
+        }
+        charClass = class_create(THIS_MODULE, CLASS_NAME);
+        if (IS_ERR(charClass)){
+                unregister_chrdev(majorNumber, DEVICE_NAME);
+                printk(KERN_ERR "VSJModule: Failed to register device class\n");
+                kfree(ht);
+                kfree(keytable);
+                return PTR_ERR(charClass);
+        }
+        charDevice = device_create(charClass, NULL, MKDEV(majorNumber, 0), NULL,
+                                   DEVICE_NAME);
+        if (IS_ERR(charDevice)){
+                class_destroy(charClass);
+                unregister_chrdev(majorNumber, DEVICE_NAME);
+                kfree(ht);
+                kfree(keytable);
+                printk(KERN_ERR "VSJModule: Failed to create the device\n");
+                return PTR_ERR(charDevice);
+        }
+        mutex_init(&ht_mutex);
+        mutex_init(&kt_mutex);
+        printk(KERN_INFO "VSJModule: device class created correctly\n");
+        return 0;
 }
 
 /** @brief Destroys character device and rhashtables.
  */
 static void __exit onunload(void) {
-        printk(KERN_INFO "VSJMod: on Unload started\n");
-
         device_destroy(charClass, MKDEV(majorNumber, 0));
         class_unregister(charClass);
         class_destroy(charClass);
-
         unregister_chrdev(majorNumber, DEVICE_NAME);
-        printk(KERN_INFO "VSJMod: on Unload destroyed charclass\n");
         rhashtable_free_and_destroy(ht, &KVDB_free_fn, NULL);
-        printk(KERN_INFO "VSJMod: on Unload after freenDestroy 1 \n");
-
-        rhashtable_free_and_destroy(keytable, NULL, NULL); //ORIGINAL
-
-        //rhashtable_free_and_destroy(keytable, &KVDB_free_fn, NULL); //new
-        printk(KERN_INFO "VSJMod: on Unload after freenDestroy 2\n");
-
-
+        rhashtable_free_and_destroy(keytable, &KVDB_keyfree, NULL);
         kfree(keytable);
         kfree(ht);
-        //manualFree(ht, &KVDB_free_fn, sizeof(struct hashed_object*), params);
-        //manualFree(keytable, NULL, sizeof(struct hashed_key*), ktparams);
-        printk(KERN_INFO "VSJModule: unloaded HT\n");
-
-  if(iteratorKey == -1) {
-    kfree(saver);
-  }
-   printk(KERN_INFO "VSJModule: Goodbye from the LKM!\n");
-   printk(KERN_INFO "VSJModule: unloaded ALL\n");
+        if(iteratorKey == -1) {
+                kfree(saver);
+        }
+        printk(KERN_INFO "VSJModule: unloaded.\n");
 
 }
 
@@ -166,11 +133,8 @@ static void __exit onunload(void) {
  *  @param filep A pointer to a file object (defined in linux/fs.h)
  */
 static int dev_open(struct inode *inodep, struct file *filep){
-   numberOpens++;
-   try_module_get(THIS_MODULE);
-   nonseekable_open(inodep, filep);
-   printk(KERN_INFO "VSJModule: Device has been opened %d time(s)\n", numberOpens);
-   return 0;
+        nonseekable_open(inodep, filep);
+        return 0;
 }
 
 /** @brief This function is called whenever device is being read from user space i.e. data is
@@ -181,67 +145,67 @@ static int dev_open(struct inode *inodep, struct file *filep){
  *  @param len The length of the b
  *  @param offset The offset if required
  */
-static ssize_t dev_read(struct file *filep, char *buffer, size_t len, loff_t *offset){
-    int err, cplen, key;
-    struct hashed_object *obj;
-    struct hashed_key *keyobj;
-    pid_t pid;
+static ssize_t dev_read(struct file *filep, char *buffer, size_t len,
+                        loff_t *offset){
+        int err, cplen, key;
+        struct hashed_object *obj;
+        struct hashed_key *keyobj;
+        pid_t pid;
+        size_t isize, ssize;
 
-    pid = task_pid_nr(current);
-
-
-    if(pid==iteratorPID) {
-        if(iteratorKey==iteratorLength) {
-            resetIterations();
-            return 0;
+        isize = sizeof(int);
+        ssize = sizeof(size_t);
+        pid = task_pid_nr(current);
+        if(pid==iteratorPID) {
+                if(iteratorKey==iteratorLength) {
+                        resetIterations();
+                        return 0;
+                }
+                if(getSize) {
+                        cplen = len > (isize + ssize) ? (isize + ssize) : len;
+                        err = copy_to_user(buffer+isize,
+                                           &(saver[iteratorKey]->size), ssize);
+                        err += copy_to_user(buffer, &(saver[iteratorKey]->key),
+                                            isize);
+                        if(err) {
+                                return -EFAULT;
+                        }
+                        getSize = 0;
+                } else {
+                        cplen = len > saver[iteratorKey]->size ? saver[iteratorKey]->size : len;
+                        err = copy_to_user(buffer, saver[iteratorKey]->value, cplen);
+                        iteratorKey++;
+                        getSize = 1;
+                        if(iteratorKey > iteratorLength){
+                                resetIterations();
+                                return -ENODATA;
+                        }
+                        if(err) {
+                                return -EFAULT;
+                        }
+                }
+                return cplen;
         }
-        if(getSize) {
-            cplen = len > (sizeof(int) + sizeof(size_t)) ? (sizeof(int) + sizeof(size_t)) : len;
-            printk(KERN_INFO "VSJModule: save: key: %d", saver[iteratorKey]->key);
-            err = copy_to_user(buffer + sizeof(int), &(saver[iteratorKey]->size), sizeof(size_t));
-            err += copy_to_user(buffer, &(saver[iteratorKey]->key), sizeof(int));
-            if(err) {
+
+        keyobj = getkey(keytable, pid, ktparams, &kt_mutex);
+        if(keyobj == NULL) {
+                return -EBADE;
+        }
+        key = keyobj->key;
+        kfree(keyobj);
+        rcu_read_lock();
+        obj = KVDB_lookup(ht, &key, params);
+        if(obj == NULL) {
+                rcu_read_unlock();
+                return -ENOKEY;
+        }
+        cplen = len > obj->size ? obj->size : len;
+        err = copy_to_user(buffer, obj->value, cplen);
+        rcu_read_unlock();
+        if(err) {
                 return -EFAULT;
-            }
-            getSize = 0;
-        } else {
-            cplen = len > saver[iteratorKey]->size ? saver[iteratorKey]->size : len;
-            err = copy_to_user(buffer, saver[iteratorKey]->value, cplen);
-            iteratorKey++;
-            getSize = 1;
-            if(iteratorKey > iteratorLength){
-                resetIterations();
-                return -ENODATA;
-            }
-            if(err) {
-                return -EFAULT;
-            }
         }
         return cplen;
-   }
-
-
-
-   keyobj = getkey(keytable, pid, ktparams);
-   if(keyobj == NULL) {
-       return -EBADE;
-   }
-   key = keyobj->key;
-   kfree(keyobj);
-   rcu_read_lock();
-   obj = KVDB_lookup(ht, &key, params);
-   if(obj == NULL) {
-   	   rcu_read_unlock();
-       return -ENOKEY;
-   }
-   cplen = len > obj->size ? obj->size : len;
-   err = copy_to_user(buffer, obj->value, cplen);
-   if(err) {
-       rcu_read_unlock();
-       return -EFAULT;
-   }
-   rcu_read_unlock();
-   return cplen;
 }
 
 /** @brief This function is called whenever the device is being written to from user space i.e.
@@ -253,144 +217,137 @@ static ssize_t dev_read(struct file *filep, char *buffer, size_t len, loff_t *of
  *  @param offset The offset if required
  */
 static ssize_t dev_write(struct file *filep, const char *buffer, size_t len, loff_t *offset){
-   char op;
-   int key = 0;
-   int err, pid;
-   void* val;
-   int remlen = len;
+        char op;
+        int key = 0;
+        int err, pid;
+        void* val;
+        int remlen = len;
+        struct pid *saverpid = NULL;
+        struct task_struct *savertask = NULL;
 
-   if(len < 1){
-       return -EBADRQC;
-   }
-   err = copy_from_user(&op,buffer,1);
-   if(err){
-       printk(KERN_INFO "VSJModule:in write copy 1 %d bytes not copied\n", err);
-       return -EFAULT;
-   }
-   printk(KERN_INFO"VSJModule req code: %c\n", op);
-   remlen -= 1;
-   err = copy_from_user(&key,&buffer[1],sizeof(int));
-   if(err){
-       printk(KERN_INFO "VSJModule:in write copy 2 %d bytes not copied\n", err);
-       return -EFAULT;
-   }
-   remlen -= sizeof(int);
-
-
-    /**
+        if(len < 1){
+                return -EBADRQC;
+        }
+        err = copy_from_user(&op,buffer,1);
+        if(err){
+                return -EFAULT;
+        }
+        remlen -= 1;
+        err = copy_from_user(&key,&buffer[1],sizeof(int));
+        if(err){
+                return -EFAULT;
+        }
+        remlen -= sizeof(int);
+        /**
         THIS is to block all SETS, DEL & SAVE
         during an active iteration.
-
-        Checks that the iterating process is alive
-   */
-   if((iteratorPID>0) && !(op == VSJ_GET)){
-    //error
-    if(find_get_pid(iteratorPID)==NULL) {
-      resetIterations();
-    } else {
-      return -EFAULT;
-    }
-   }
-
-   switch (op) {
-   case VSJ_GET:
-        pid = task_pid_nr(current);
-        err = addkey(key, keytable, pid, ktparams);
-        if(err){
-            return err;
+        Checks that a task with that pid still exists, (it may be a zombie or
+        a new process who got the pid after the saving process died)
+        */
+        if((iteratorPID>0) && op != VSJ_GET){
+                err = -EFAULT;
+                saverpid = find_get_pid(iteratorPID);
+                rcu_read_lock();
+                if(saverpid !=NULL) {
+                        savertask = pid_task(saverpid, PIDTYPE_PID);
+                        put_pid(saverpid);
+                }
+                if(savertask == NULL){
+                        err = 0;
+                }
+                rcu_read_unlock();
+                if(err){
+                        return err;
+                }
         }
-        return 5;
-   case VSJ_SET:
-        if(remlen < 1){
-            return -ENODATA; //Ändra till lämpligare
+        switch (op) {
+        case VSJ_GET:
+                pid = task_pid_nr(current);
+                err = addkey(key, keytable, pid, ktparams, &kt_mutex);
+                if(err){
+                        return err;
+                }
+                return 5;
+        case VSJ_SET:
+                if(remlen < 1){
+                        return -ENODATA;
+                }
+                if(max_val_size && remlen > max_val_size){
+                        return -EFBIG;
+                }
+                val = kmalloc(remlen, GFP_KERNEL);
+                if(unlikely(val == NULL)){
+                        return -ENOMEM;
+                }
+                err = copy_from_user(val, &buffer[5], remlen);
+                if(err){
+                        kfree(val);
+                        return -EFAULT;
+                }
+                err = KVDB_add(key, val, remlen);
+                if(err){
+                        kfree(val);
+                        return err;
+                }
+                return len;
+        case VSJ_DEL:
+                return KVDB_remove(&key);
+        case VSJ_SAVE:
+                lockAndRead();
+                return 0;
         }
-        if(max_val_size && remlen > max_val_size){
-          return -EFBIG;
-        }
-        val = kmalloc(remlen, GFP_KERNEL);
-        if(unlikely(val == NULL)){
-            return -ENOMEM;
-        }
-        err = copy_from_user(val, &buffer[5], remlen);
-        if(err){            printk(KERN_INFO "VSJModule:in write SET %d bytes not copied\n", err);
-            kfree(val);
-            return -EFAULT;
-        }
-        err = KVDB_add(key, val, remlen);
-        if(err){
-            kfree(val);
-            return err;
-        }
-        return len;
-    case VSJ_DEL:
-        return KVDB_remove(&key);
-    case VSJ_SAVE:
-        printk(KERN_INFO "VSJModule in SAVE\n");
-        lockAndRead();
-        return 0;
-   }
-   return -EBADRQC;
+        return -EBADRQC;
 }
 
 
 static void resetIterations(void){
-      mutex_lock(&save_mutex);
-      iteratorPID=-1;
-      iteratorKey=-1;
-      if(saver != NULL){
-        kfree(saver);
-        saver = NULL;
-      }
-      mutex_unlock(&save_mutex);
+        mutex_lock(&ht_mutex);
+        iteratorPID=-1;
+        iteratorKey=-1;
+        getSize = 1;
+        if(saver != NULL){
+                kfree(saver);
+                saver = NULL;
+        }
+        mutex_unlock(&ht_mutex);
  }
 
 
 static int lockAndRead(void) {
-    mutex_lock(&save_mutex);
-    if(iteratorPID>0){
-      mutex_unlock(&save_mutex);
-      return -1; //ERRORNR
-    }
-    int i=0;
-    struct hashed_object *p;
-    iteratorKey=0;
-    iteratorPID=task_pid_nr(current);
-
-    iter=kmalloc(sizeof(struct rhashtable_iter),GFP_KERNEL);
-//      rhashtable_walk_enter(ht,iter) UNWORKS ON LINUX 4.4
-    rhashtable_walk_init(ht, iter);
-    if(iter==NULL){
-        printk(KERN_INFO "iter == Null");
-        iteratorPID=-1;
-        iteratorKey=-1;
-        mutex_unlock(&save_mutex);
-        return -ENOMEM;
-
-    }
-    rhashtable_walk_start(iter);
-    p = rhashtable_walk_next(iter);
-
-    /* if(p!=NULL) {
-      printk(KERN_INFO " p not null");
-    }
-    else {
-      printk(KERN_INFO " P IS NULL");
-    }*/
-    iteratorLength = atomic_read(&ht->nelems);
-    saver=kmalloc(sizeof(struct hashed_object*)*iteratorLength, GFP_KERNEL);
-    while(p!=NULL) {
-      saver[i]=p;
-    //  printk(KERN_INFO "VSJ LockAndRead: iterator %s, nele : %d\n",saver[i]->value,iteratorLength);
-      p=rhashtable_walk_next(iter);
-      i++;
-    }
-    rhashtable_walk_stop(iter);
-    rhashtable_walk_exit(iter);
-    kfree(iter);
-    iter = NULL;
-    //nn:aa;:
-    mutex_unlock(&save_mutex);
-    return 0;
+        int i;
+        struct hashed_object *p;
+        mutex_lock(&ht_mutex);
+        if(iteratorPID>0){
+                mutex_unlock(&ht_mutex);
+                return -EINPROGRESS;
+        }
+        i=0;
+        iteratorKey=0;
+        iteratorPID=task_pid_nr(current);
+        iter=kmalloc(sizeof(struct rhashtable_iter),GFP_KERNEL);
+        rhashtable_walk_init(ht, iter);
+        if(iter==NULL){
+                printk(KERN_INFO "iter == Null");
+                iteratorPID=-1;
+                iteratorKey=-1;
+                mutex_unlock(&ht_mutex);
+                return -ENOMEM;
+        }
+        rhashtable_walk_start(iter);
+        p = rhashtable_walk_next(iter);
+        iteratorLength = atomic_read(&ht->nelems);
+        saver=kmalloc(sizeof(struct hashed_object*)*iteratorLength, GFP_KERNEL);
+        while(p!=NULL) {
+                saver[i]=p;
+                p=rhashtable_walk_next(iter);
+                i++;
+        }
+        rhashtable_walk_stop(iter);
+        rhashtable_walk_exit(iter);
+        kfree(iter);
+        iter = NULL;
+        mutex_unlock(&ht_mutex);
+        return 0;
 }
 
 
@@ -405,12 +362,10 @@ static int dev_release(struct inode *inodep, struct file *filep){
         if(iteratorPID == task_pid_nr(current)){
                 resetIterations();
         }
-        key = getkey(keytable, pid, ktparams);
+        key = getkey(keytable, pid, ktparams, &kt_mutex);
         if(key != NULL){
                 kfree(key);
         }
-        printk(KERN_INFO "VSJModule: Device successfully closed\n");
-        module_put(THIS_MODULE);
         return 0;
 }
 
@@ -418,28 +373,26 @@ static int dev_release(struct inode *inodep, struct file *filep){
  *  a rhashtable for the get requests.
  */
 static int setupNewKVDB(void) {
-    int ret;
-    printk(KERN_INFO "setupNewKVDB in progress @ last\n");
-    ht = kmalloc(sizeof(struct rhashtable), GFP_KERNEL);
-    if(ht == NULL){
-        return -ENOMEM;
-    }
-    ret = rhashtable_init(ht, &params);
-    if(ret != 0){
-        kfree(ht);
-    }
-
-    keytable = kmalloc(sizeof(struct rhashtable), GFP_KERNEL);
-    if(keytable == NULL){
-        kfree(ht);
-        return -ENOMEM;
-    }
-    ret = rhashtable_init(keytable, &ktparams);
-    if(ret != 0){
-        kfree(keytable);
-        kfree(ht);
-    }
-    return ret;
+        int ret;
+        ht = kmalloc(sizeof(struct rhashtable), GFP_KERNEL);
+        if(ht == NULL){
+                return -ENOMEM;
+        }
+        ret = rhashtable_init(ht, &params);
+        if(ret != 0){
+                kfree(ht);
+        }
+        keytable = kmalloc(sizeof(struct rhashtable), GFP_KERNEL);
+        if(keytable == NULL){
+                kfree(ht);
+                return -ENOMEM;
+        }
+        ret = rhashtable_init(keytable, &ktparams);
+        if(ret != 0){
+                kfree(keytable);
+                kfree(ht);
+        }
+        return ret;
 }
 
 /** @brief Added a key-value object to the rhashtable.
@@ -448,21 +401,20 @@ static int setupNewKVDB(void) {
  *  @param size The size of the value
  */
 static int KVDB_add (int key, void *val, size_t size){
-    int ret;
-    struct hashed_object *obj;
-    obj = kmalloc(sizeof(struct hashed_object), GFP_KERNEL);
-    if(unlikely(obj == NULL)){
-        return -ENOMEM;
-    }
-
-    obj->key = key;
-    obj->value = val;
-    obj->size = size;
-    ret = rhashtable_lookup_insert_fast(ht, &(obj->node), params);
-    if(ret != 0){
-        kfree(obj);
-    }
-    return ret;
+        int ret;
+        struct hashed_object *obj;
+        obj = kmalloc(sizeof(struct hashed_object), GFP_KERNEL);
+        if(unlikely(obj == NULL)){
+                return -ENOMEM;
+        }
+        obj->key = key;
+        obj->value = val;
+        obj->size = size;
+        ret = rhashtable_lookup_insert_fast(ht, &(obj->node), params);
+        if(ret != 0){
+                kfree(obj);
+        }
+        return ret;
 }
 
 /** @brief Remove a key-value object with the given key
@@ -470,100 +422,48 @@ static int KVDB_add (int key, void *val, size_t size){
  *  @param key The key for the value to remove
  */
 static int KVDB_remove (int *key){
-    mutex_lock(&del_mutex);
-    struct hashed_object *obj;
-    int ret;
-    obj = rhashtable_lookup_fast(ht, key, params);
-    if(obj == NULL){
-        return -ENOENT;
-    }
-    ret = rhashtable_remove_fast(ht, &(obj->node), params);
-    if(ret == 0){
-        synchronize_rcu();
-        kfree(obj->value);
-        kfree(obj);
-    }
-    mutex_unlock(&del_mutex);
-    return ret;
+        struct hashed_object *obj;
+        int ret;
+        int j;
+        j=1;
+        mutex_lock(&ht_mutex);
+        printk("VSJ: %d", j);
+        if(iteratorPID>0){
+                mutex_unlock(&ht_mutex);
+                return -EBUSY;
+        }
+                printk("VSJ: %d", j);
+        obj = rhashtable_lookup_fast(ht, key, params);
+                printk("VSJ: %d", j);
+        if(obj == NULL){
+                mutex_unlock(&ht_mutex);
+                return -ENOENT;
+        }
+                printk("VSJ: %d", j);
+        ret = rhashtable_remove_fast(ht, &(obj->node), params);
+                printk("VSJ: %d", j);
+        if(ret == 0){
+                synchronize_rcu();
+                kfree(obj->value);
+                kfree(obj);
+        }
+                printk("VSJ: %d", j);
+        mutex_unlock(&ht_mutex);
+        return ret;
 }
 
 /** @brief Free function for the key-value rhashtable
  */
 static void KVDB_free_fn(void *ptr, void *arg) {
-        printk("VSJModule: freeing ht key: %d\n", ((struct hashed_object *)ptr)->key);
-    kfree(((struct hashed_object *)ptr)->value);
-    kfree(ptr);
+        kfree(((struct hashed_object *)ptr)->value);
+        kfree(ptr);
 }
 
 /** @brief Free function for get request rhashtable
  */
 static void KVDB_keyfree(void *ptr, void *arg){
-        printk("VSJModule: freeing keyt key: %d\n", ((struct hashed_key *)ptr)->pid);
- // kfree(&((struct hashed_key *)ptr)->value);
-    kfree(ptr);
+        kfree(ptr);
 }
 
-/*//FIXA
-static void manualFree(struct rhashtable *hashtab,
-                        void (*free_fn)(void *ptr, void *arg), size_t valsize,
-                        const struct rhashtable_params parm){
-        int i = 0;
-        int j = 1;
-        void* p = NULL;
-        void ** values = NULL;
-        struct rhashtable_iter it;
-        printk("VSJ: manualFree %d \n", j++);
-        iteratorLength = atomic_read(&hashtab->nelems);
-        printk("VSJ: manualFree %d \n", j++);
-        if(iteratorLength > 0){
-                printk("VSJ: manualFree %d \n", j++);
-                rhashtable_walk_init(hashtab, &it);
-                if(0 > rhashtable_walk_init(hashtab, &it)){
-                        return;
-                }
-                printk("VSJ: manualFree %d \n", j++);
-                rhashtable_walk_start(&it);
-                printk("VSJ: manualFree %d \n", j++);
-                p = rhashtable_walk_next(&it);
-                printk("VSJ: manualFree %d \n", j++);
-                iteratorLength = atomic_read(&hashtab->nelems);
-                printk("VSJ: manualFree %d \n", j++);
-                values=kmalloc(valsize *iteratorLength, GFP_KERNEL);
-                printk("VSJ: manualFree %d \n", j++);
-                while(p!=NULL) {
-                        values[i++]=p;
-                        p=rhashtable_walk_next(&it);
-                }
-                printk("VSJ: manualFree %d \n", j++);
-                rhashtable_walk_stop(&it);
-                printk("VSJ: manualFree %d \n", j++);
-                rhashtable_walk_exit(&it);
-                printk("VSJ: manualFree %d \n", j++);
-        }
-        printk("VSJ: manualFree %d \n", j++);
-        for(i = 0; i < iteratorLength; ++i){
-                p = values[i];
-                printk("VSJ manualFree i :%d \n", i);
-                rhashtable_remove_fast(hashtab, (p + parm.head_offset), parm);
-                if(free_fn != NULL){
-                        free_fn(p, NULL);
-                } else {
-                        kfree(p);
-                }
-        }
-        rhashtable_free_and_destroy(hashtab, NULL, NULL);
-        kfree(hashtab);
-        if(values != NULL){
-                kfree(values);
-        }
-}*/
-
-
-/** @brief Free function for get request rhashtable
- */
-/*static void keyfree(void *ptr, void *arg){
-  kfree(&((struct hashed_object *)ptr)->value);
-    kfree(ptr);
-}*/
 module_init(onload);
 module_exit(onunload);

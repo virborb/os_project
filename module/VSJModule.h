@@ -25,54 +25,56 @@ static int     dev_open(struct inode *, struct file *);
 static int     dev_release(struct inode *, struct file *);
 static ssize_t dev_read(struct file *, char *, size_t, loff_t *);
 static ssize_t dev_write(struct file *, const char *, size_t, loff_t *);
-static int    setupNewKVDB(void);
-static int KVDB_add (int key, void *val, size_t size);
-static int KVDB_remove (int *key);
-static void KVDB_free_fn(void *ptr, void *arg);
-static void KVDB_keyfree(void *ptr, void *arg);
-static int lockAndRead(void);
-static void resetIterations(void);
-static void manualFree(struct rhashtable *hashtab,
+static int     setupNewKVDB(void);
+static int     KVDB_add (int key, void *val, size_t size);
+static int     KVDB_remove (int *key);
+static void    KVDB_free_fn(void *ptr, void *arg);
+static void    KVDB_keyfree(void *ptr, void *arg);
+static int     lockAndRead(void);
+static void    resetIterations(void);
+/*static void manualFree(struct rhashtable *hashtab,
                         void (*free_fn)(void *ptr, void *arg), size_t valsize,
-                        const struct rhashtable_params parm);
+                        const struct rhashtable_params parm);*/
 
-static inline struct hashed_object *KVDB_lookup(
-        struct rhashtable *ht, const int *key,
-	    const struct rhashtable_params params) {
+static inline struct hashed_object *KVDB_lookup(struct rhashtable *ht,
+                                        const int *key,
+	                                const struct rhashtable_params params) {
     return (struct hashed_object*) rhashtable_lookup_fast(ht, key, params);
 }
 
 static inline struct hashed_key *getkey(struct rhashtable *keytable, const pid_t pid,
-                        const struct rhashtable_params keytparams) {
+                        const struct rhashtable_params keytparams,
+                        struct mutex *kt_mutex) {
         struct hashed_key *keystruct;
-        mutex_lock(&keytable->mutex);
+        mutex_lock(kt_mutex);
         keystruct = (struct hashed_key*) rhashtable_lookup_fast(keytable, &pid, keytparams);
         if(keystruct == NULL) {
-                mutex_unlock(&keytable->mutex);
+                mutex_unlock(kt_mutex);
                 return NULL;
         }
         rhashtable_remove_fast(keytable, &(keystruct->node), keytparams);
-        mutex_unlock(&keytable->mutex);
+        mutex_unlock(kt_mutex);
         return keystruct;
 }
 
 static inline int addkey (int key, struct rhashtable *keytable, const pid_t pid,
-                        const struct rhashtable_params keytparams){
-    int ret;
-    struct hashed_key *obj;
-    obj = kmalloc(sizeof(struct hashed_key), GFP_KERNEL);
-    if(unlikely(obj == NULL)){
-        return -ENOMEM;
-    }
-    obj->key = key;
-    obj->pid = pid;
-    mutex_lock(&keytable->mutex);
-    ret = rhashtable_insert_fast(keytable, &(obj->node), keytparams);
-    if(ret != 0) {
-        kfree(obj);
-    }
-    mutex_unlock(&keytable->mutex);
-    return ret;
+                        const struct rhashtable_params keytparams,
+                        struct mutex *kt_mutex){
+        int ret;
+        struct hashed_key *obj;
+        obj = kmalloc(sizeof(struct hashed_key), GFP_KERNEL);
+        if(unlikely(obj == NULL)){
+                return -ENOMEM;
+        }
+        obj->key = key;
+        obj->pid = pid;
+        mutex_lock(kt_mutex);
+        ret = rhashtable_insert_fast(keytable, &(obj->node), keytparams);
+        if(ret != 0) {
+                kfree(obj);
+        }
+        mutex_unlock(kt_mutex);
+        return ret;
 }
 
 #endif

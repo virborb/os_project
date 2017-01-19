@@ -249,7 +249,7 @@ static ssize_t dev_write(struct file *filep, const char *buffer, size_t len, lof
                         put_pid(saverpid);
                 }
                 if(savertask == NULL){
-                        iteratorPID = 0;
+                        resetIterations();
                         err = 0;
                 }
                 rcu_read_unlock();

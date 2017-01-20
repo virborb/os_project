@@ -46,14 +46,12 @@ static inline struct hashed_key *getkey(struct rhashtable *keytable, const pid_t
                         const struct rhashtable_params keytparams,
                         struct mutex *kt_mutex) {
         struct hashed_key *keystruct;
-        mutex_lock(kt_mutex);
         keystruct = (struct hashed_key*) rhashtable_lookup_fast(keytable, &pid, keytparams);
         if(keystruct == NULL) {
                 mutex_unlock(kt_mutex);
                 return NULL;
         }
         rhashtable_remove_fast(keytable, &(keystruct->node), keytparams);
-        mutex_unlock(kt_mutex);
         return keystruct;
 }
 
@@ -68,12 +66,10 @@ static inline int addkey (int key, struct rhashtable *keytable, const pid_t pid,
         }
         obj->key = key;
         obj->pid = pid;
-        mutex_lock(kt_mutex);
         ret = rhashtable_insert_fast(keytable, &(obj->node), keytparams);
         if(ret != 0) {
                 kfree(obj);
         }
-        mutex_unlock(kt_mutex);
         return ret;
 }
 
